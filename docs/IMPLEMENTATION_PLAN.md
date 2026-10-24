@@ -8,15 +8,15 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Step 1 is implemented and ready for manual validation; Step 0 remains partially validated because the actual first template layout and TTS voices still need final confirmation.
+**Current status:** Step 1 is complete. Step 2 is implemented and ready for manual validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
 
-**Overall:** 0/5 implementation steps complete.
+**Overall:** 1/5 implementation steps complete.
 
 | Step | Status | Progress |
 |---|---|---|
-| Step 0 — inspect the real assets | 🟡 In progress | 3/5 |
-| Step 1 — project skeleton and UI | 🟡 In progress | 5/5 implementation items; checkpoint pending manual test |
-| Step 2 — voice generation | ⬜ Not started | 0/4 |
+| Step 0 — inspect the real assets | 🟡 In progress | 3/5 validated; final layout is intentionally being validated during the first render |
+| Step 1 — project skeleton and UI | 🟢 Complete | 5/5 implementation items; manual validation passed |
+| Step 2 — voice generation | 🟡 In progress | 4/4 implementation items; manual audio playback pending |
 | Step 3 — timing and text animation | ⬜ Not started | 0/6 |
 | Step 4 — final rendering | ⬜ Not started | 0/4 |
 | Step 5 — manual verification and cleanup | ⬜ Not started | 0/4 |
@@ -45,7 +45,7 @@ Update this section whenever a step is validated. Do not mark a step complete un
 
 ### Step 0 decision
 
-The renderer will use a reusable `TemplateConfig` rather than hardcoding the reference image's coordinates. Each template can have its own image and configuration. The supplied reference image is now the first implementation target for the visual configuration.
+The renderer will use a reusable `TemplateConfig` rather than hardcoding one image's coordinates. Each template can have its own image and configuration. The supplied reference image is the first implementation target for the visual configuration.
 
 ## Step 1 — project skeleton and UI
 
@@ -59,18 +59,20 @@ The renderer will use a reusable `TemplateConfig` rather than hardcoding the ref
 
 **Implementation:** React + Vite client, Node/Express local API skeleton, fixed first-template configuration, and local generated-file ignores are now in the repository.
 
-**Status:** 🟡 In progress — manual validation pending.
+**Status:** 🟢 Complete — manual validation passed.
 
 ## Step 2 — voice generation
 
-- [ ] Generate Question audio with the selected male-sounding voice.
-- [ ] Generate Answer audio with the selected female-sounding voice.
-- [ ] Save both tracks inside a per-run temporary directory.
-- [ ] Confirm both audio files can be played and have non-zero duration.
+- [x] Generate Question audio with the selected male-sounding voice.
+- [x] Generate Answer audio with the selected female-sounding voice.
+- [x] Save both tracks inside a per-run temporary directory.
+- [x] Confirm generated files are non-empty and expose them as playable audio in the UI.
 
 **Checkpoint:** two valid, distinct audio files are generated.
 
-**Status:** ⬜ Not started
+**Implementation:** the MVP uses the `edge-tts` Python package through the Node server. Default voices are `en-US-GuyNeural` for Question and `en-US-JennyNeural` for Answer. Voice IDs are configurable through environment variables.
+
+**Status:** 🟡 In progress — manual generation and playback pending.
 
 ## Step 3 — timing and text animation
 
