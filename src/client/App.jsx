@@ -5,8 +5,8 @@ const API_BASE_URL = "http://127.0.0.1:3001";
 const TEMPLATE_CONFIG = {
   canvas: { width: 1080, height: 1920 },
   gapSeconds: 0.45,
-  question: { x: 90, y: 430, width: 900 },
-  answer: { x: 90, y: 700, width: 900 }
+  question: { x: 90, y: 250, width: 900 },
+  answer: { x: 90, y: 440, width: 900 }
 };
 
 function getVisibleText(text, progress) {
@@ -76,20 +76,33 @@ function App() {
 
   function handleQuestionTimeUpdate() {
     const audio = questionAudioRef.current;
-    if (!audio?.duration) return;
-    setSegmentProgress(Math.min(1, audio.currentTime / audio.duration));
+
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+
+    setSegmentProgress(
+      Math.min(1, audio.currentTime / audio.duration)
+    );
   }
 
   function handleAnswerTimeUpdate() {
     const audio = answerAudioRef.current;
-    if (!audio?.duration) return;
-    setSegmentProgress(Math.min(1, audio.currentTime / audio.duration));
+
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+
+    setSegmentProgress(
+      Math.min(1, audio.currentTime / audio.duration)
+    );
   }
 
   function handleQuestionEnded() {
     const answerAudio = answerAudioRef.current;
     if (!answerAudio) return;
 
+    // Keep the question fully visible during the transition gap.
     setPreviewState("gap");
     setSegmentProgress(1);
 
@@ -195,9 +208,14 @@ function App() {
   }
 
   const questionVisibleText =
-    previewState === "answer" || previewState === "complete"
-      ? question.trim()
-      : getVisibleText(question.trim(), previewState === "question" ? segmentProgress : 0);
+    previewState === "answer" ||
+      previewState === "gap" ||
+      previewState === "complete"
+      ? `Q. ${question.trim()}`
+      : getVisibleText(
+        `Q. ${question.trim()}`,
+        previewState === "question" ? segmentProgress : 0
+      );
 
   const answerVisibleText =
     previewState === "complete"
@@ -284,9 +302,17 @@ function App() {
             <audio
               ref={questionAudioRef}
               src={audioResult.questionAudioUrl}
-              onLoadedMetadata={(event) =>
-                setDurations((current) => ({ ...current, question: event.currentTarget.duration }))
-              }
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                const duration = event.currentTarget?.duration;
+
+                if (Number.isFinite(duration) && duration > 0) {
+                  setDurations((current) => ({
+                    ...current,
+                    question: duration
+                  }));
+                }
+              }}
               onTimeUpdate={handleQuestionTimeUpdate}
               onEnded={handleQuestionEnded}
             />
@@ -294,9 +320,17 @@ function App() {
             <audio
               ref={answerAudioRef}
               src={audioResult.answerAudioUrl}
-              onLoadedMetadata={(event) =>
-                setDurations((current) => ({ ...current, answer: event.currentTarget.duration }))
-              }
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                const duration = event.currentTarget?.duration;
+
+                if (Number.isFinite(duration) && duration > 0) {
+                  setDurations((current) => ({
+                    ...current,
+                    answer: duration
+                  }));
+                }
+              }}
               onTimeUpdate={handleAnswerTimeUpdate}
               onEnded={handleAnswerEnded}
             />

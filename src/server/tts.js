@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 
 const pythonBin = process.env.PYTHON_BIN || "python";
-const questionVoice = process.env.QUESTION_VOICE || "en-US-ChristopherNeural";
-const answerVoice = process.env.ANSWER_VOICE || "en-US-JennyNeural";
+const questionVoice = process.env.QUESTION_VOICE;
+const answerVoice = process.env.ANSWER_VOICE;
 const ttsRate = process.env.TTS_RATE || "-10%";
 
 function generateWithEdgeTts({ text, voice, outputPath }) {
@@ -12,8 +12,7 @@ function generateWithEdgeTts({ text, voice, outputPath }) {
       "edge_tts",
       "--voice",
       voice,
-      "--rate",
-      ttsRate,
+      `--rate=${ttsRate}`,
       "--text",
       text,
       "--write-media",
