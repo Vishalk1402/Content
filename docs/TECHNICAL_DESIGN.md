@@ -7,12 +7,12 @@ Use the smallest implementation that can reliably deliver the required output. T
 ## 2. Proposed stack
 
 - **UI:** React with JavaScript (not TypeScript).
-- **Local API/process:** Node.js with a small Express server, unless a purely local script is demonstrably faster to implement.
-- **Text-to-speech:** use a provider with suitable male- and female-sounding voices. A local or free option can be selected during implementation after checking availability and installation friction.
+- **Local API/process:** Node.js with a small Express server.
+- **Text-to-speech:** `edge-tts` through Python for the MVP. It uses Microsoft Edge's online TTS service and does not require an API key. The implementation uses separate configurable voices for Question and Answer.
 - **Rendering:** FFmpeg for final video composition and MP4 encoding. Use a generated frame sequence or a lightweight HTML/canvas renderer to create the typewriter overlay; avoid building a custom video engine.
 - **Temporary files:** one per-generation temporary directory, removed after the final output is ready or when a failed generation is safely cleaned up.
 
-The exact TTS provider is intentionally an implementation decision. Do not promise a voice ID before verifying it exists and works on the target machine.
+The current default voices are `en-US-GuyNeural` (Question) and `en-US-JennyNeural` (Answer). Voice IDs are environment configuration so they can be changed without modifying the renderer.
 
 ## 3. Components
 
@@ -81,6 +81,27 @@ A uniform character reveal is the simplest baseline. If it looks unnatural, reve
 - Use a short silence segment between tracks.
 - Avoid mixing the two voice files concurrently.
 - Final audio must contain Question (male), silence/gap, Answer (female), in that order.
+
+### Current TTS implementation
+
+The Node server calls the Python `edge-tts` module using a child process. The command writes each voice result directly to the per-run workspace.
+
+Required local setup:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+The current configuration is:
+
+```text
+QUESTION_VOICE=en-US-GuyNeural
+ANSWER_VOICE=en-US-JennyNeural
+```
+
+Set `PYTHON_BIN` when the Python executable is not available as `python` on PATH. For example, Windows installations may use a Python launcher command or an explicit executable path.
+
+The `edge-tts` command supports selecting a specific voice and writing generated speech to a media file; the available voice list can be checked with its `--list-voices` option. citeturn0search0turn0search11
 
 ## 5. Template configuration
 
@@ -154,6 +175,8 @@ Inputs: image, question, answer, templateConfig
 Success: { videoUrl: "/outputs/<id>.mp4" }
 Failure: { error: "Human-readable explanation" }
 ```
+
+The current implementation uses the same endpoint to generate and return the two temporary audio URLs while the video renderer is still being built.
 
 A status endpoint, job queue, database, and persistent job model are unnecessary unless the chosen renderer requires asynchronous polling for a practical reason.
 
