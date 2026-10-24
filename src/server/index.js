@@ -15,6 +15,21 @@ const upload = multer({
 
 const tempRoot = path.resolve(process.cwd(), "temp");
 
+// The React/Vite development server runs on a different local origin.
+// Allow only the local frontend origin used by this project.
+const allowedOrigin = "http://127.0.0.1:5173";
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 app.use(express.json({ limit: "100kb" }));
 app.use("/generated", express.static(tempRoot));
 
