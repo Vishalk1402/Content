@@ -1,0 +1,32 @@
+{
+  "name": "devwithvk-reference-template",
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fit": "contain"
+  },
+  "fps": 30,
+  "gapSeconds": 0.45,
+  "question": {
+    "x": 90,
+    "y": 430,
+    "width": 900,
+    "fontSize": 58,
+    "fontFamily": "Arial",
+    "fontWeight": 700,
+    "color": "#FFFFFF",
+    "lineHeight": 1.2,
+    "alignment": "left"
+  },
+  "answer": {
+    "x": 90,
+    "y": 700,
+    "width": 900,
+    "fontSize": 48,
+    "fontFamily": "Arial",
+    "fontWeight": 500,
+    "color": "#FFFFFF",
+    "lineHeight": 1.25,
+    "alignment": "left"
+  }
+}
