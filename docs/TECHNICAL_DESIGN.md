@@ -18,7 +18,7 @@ The exact TTS provider is intentionally an implementation decision. Do not promi
 
 ```text
 React UI
-  ├─ Image picker + preview
+  ├─ Template image picker + preview
   ├─ Question textarea
   ├─ Answer textarea
   ├─ Generate status
@@ -27,6 +27,7 @@ React UI
         v
 Node local API
   ├─ Validate image and text
+  ├─ Resolve TemplateConfig
   ├─ Create per-run workspace
   ├─ TTS: Question → male voice → question audio
   ├─ TTS: Answer → female voice → answer audio
@@ -40,14 +41,14 @@ Node local API
 
 ### V1 default: frame-based typewriter overlay + FFmpeg
 
-1. Load the template image and determine its dimensions.
-2. Create a canvas with the configured output dimensions. Keep the image aspect ratio unless a deliberate crop/pad option is selected.
-3. Define fixed Question and Answer text boxes in a template configuration.
+1. Load the selected template image and determine its dimensions.
+2. Resolve the template's `TemplateConfig`.
+3. Create the output canvas using the configured dimensions/aspect-ratio behavior.
 4. Generate each audio file separately.
 5. Read the duration of each audio segment.
 6. Use the audio duration to calculate a reveal progression. Render at a fixed frame rate (default 30 FPS), exposing progressively more text on each frame.
-7. Make the Question overlay visible only during the Question segment. Clear it before/at the configured Answer start. Make the Answer overlay visible only during the Answer segment.
-8. Combine the frames/overlay with the static background image and concatenated audio.
+7. Make the Question overlay visible only during the Question segment. Make the Answer overlay visible only during the Answer segment.
+8. Combine the frames/overlay with the selected template image and concatenated audio.
 9. Encode an H.264 MP4 with AAC audio, or use other compatible codecs supported by the local FFmpeg build.
 
 Avoid rendering all frames at once if a long answer would create a large memory footprint; stream frames or render to temporary images/video where practical.
@@ -83,25 +84,25 @@ A uniform character reveal is the simplest baseline. If it looks unnatural, reve
 
 ## 5. Template configuration
 
-Template layout is code/config for V1, not a UI editor.
+Template layout is code/config for V1, not a UI editor. **The renderer must not hardcode one global set of coordinates**, because different template images can have different layouts.
 
-Example only; replace coordinates and style after examining the actual template image:
+Each template can have a small configuration such as:
 
 ```json
 {
-  "name": "first-template",
+  "name": "devwithvk-reference",
   "fps": 30,
   "gapSeconds": 0.45,
   "canvas": {
-    "width": 720,
-    "height": 1280,
+    "width": 1080,
+    "height": 1920,
     "fit": "contain"
   },
   "question": {
-    "x": 48,
-    "y": 250,
-    "width": 624,
-    "fontSize": 44,
+    "x": 80,
+    "y": 300,
+    "width": 920,
+    "fontSize": 64,
     "fontFamily": "Arial",
     "fontWeight": 700,
     "color": "#FFFFFF",
@@ -109,10 +110,10 @@ Example only; replace coordinates and style after examining the actual template 
     "alignment": "left"
   },
   "answer": {
-    "x": 48,
-    "y": 430,
-    "width": 624,
-    "fontSize": 36,
+    "x": 80,
+    "y": 700,
+    "width": 920,
+    "fontSize": 52,
     "fontFamily": "Arial",
     "fontWeight": 500,
     "color": "#FFFFFF",
@@ -122,7 +123,24 @@ Example only; replace coordinates and style after examining the actual template 
 }
 ```
 
-These values are placeholders, not assumed measurements from the user's template. Match the actual image and its available empty areas.
+The values above are **examples only** and must not be treated as measured coordinates. The supplied 1080×1920 image is a reference asset; exact positions should be established for whichever template is used in the first real render.
+
+A future template can have its own config without changing the rendering pipeline:
+
+```text
+templates/
+├── devwithvk-reference/
+│   ├── template.png
+│   └── config.json
+├── template-02/
+│   ├── template.png
+│   └── config.json
+└── template-03/
+    ├── template.png
+    └── config.json
+```
+
+For the one-day MVP, the user does not need a template-management UI. The selected image and its matching configuration can be treated as local project assets.
 
 ## 6. Minimal API shape
 
@@ -132,7 +150,7 @@ Example conceptual endpoint:
 
 ```text
 POST /api/generate
-Inputs: image, question, answer
+Inputs: image, question, answer, templateConfig
 Success: { videoUrl: "/outputs/<id>.mp4" }
 Failure: { error: "Human-readable explanation" }
 ```
@@ -148,7 +166,7 @@ content-video-maker/
 │   ├── client/             # React UI
 │   └── server/             # API and generation pipeline
 ├── templates/
-│   └── first-template.json # fixed style/coordinates (optional)
+│   └── first-template/     # image + config for the first real template
 ├── temp/                   # ignored by Git
 ├── outputs/                # ignored by Git
 ├── .env.example
