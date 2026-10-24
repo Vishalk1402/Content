@@ -8,13 +8,13 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Documentation complete — implementation not started.
+**Current status:** Step 0 is partially validated; implementation setup is next.
 
 **Overall:** 0/5 implementation steps complete.
 
 | Step | Status | Progress |
 |---|---|---|
-| Step 0 — inspect the real assets | ⬜ Not started | 0/5 |
+| Step 0 — inspect the real assets | 🟡 In progress | 3/5 |
 | Step 1 — project skeleton and UI | ⬜ Not started | 0/5 |
 | Step 2 — voice generation | ⬜ Not started | 0/4 |
 | Step 3 — timing and text animation | ⬜ Not started | 0/6 |
@@ -32,15 +32,20 @@ Update this section whenever a step is validated. Do not mark a step complete un
 
 ## Step 0 — inspect the real assets (first)
 
-- [ ] Use the actual template image the user will upload.
-- [ ] Identify its dimensions, aspect ratio, existing text, and available Question/Answer text regions.
-- [ ] Confirm where the Question and Answer should appear and whether they should replace/cover any existing placeholder text.
-- [ ] Choose text boxes, font sizes, colors, and wrapping based on the image.
+- [x] Inspect the supplied reference template image.
+- [x] Confirm the reference image is 1080×1920 and 9:16.
+- [x] Confirm that the reference is only one example and that different templates must be supported.
+- [ ] Identify the actual first template's dimensions, existing text, and available Question/Answer text regions.
+- [ ] Choose text boxes, font sizes, colors, and wrapping based on the actual first template.
 - [ ] Confirm whether a usable male/female voice pair is available in the chosen TTS provider.
 
-**Checkpoint:** the template layout and voices are known well enough to render a first output.
+**Checkpoint:** the actual first template layout and voices are known well enough to render a first output.
 
-**Status:** ⬜ Not started
+**Status:** 🟡 In progress
+
+### Step 0 decision
+
+The renderer will use a reusable `TemplateConfig` rather than hardcoding the reference image's coordinates. Each template can have its own image and configuration. The reference image establishes the general 9:16 visual pattern, but it is not the only supported template.
 
 ## Step 1 — project skeleton and UI
 
@@ -115,7 +120,7 @@ This is an aggressive one-day target, not a guarantee. The highest-risk items ar
 
 ## If blocked
 
-1. Keep the first layout hardcoded.
+1. Keep the first layout hardcoded through its `TemplateConfig`.
 2. Use duration-based typewriter timing, not forced alignment.
 3. Avoid databases, login, deployment, queues, template editors, batch jobs, and extra providers.
 4. Prefer an easily installed, tested TTS option over an ideal but complex setup.
