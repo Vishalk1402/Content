@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const API_BASE_URL = "http://127.0.0.1:3001";
 
 function App() {
   const [templateFile, setTemplateFile] = useState(null);
@@ -8,6 +9,8 @@ function App() {
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
+  const [audioResult, setAudioResult] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (!templateFile) {
@@ -22,13 +25,14 @@ function App() {
   }, [templateFile]);
 
   const canGenerate = useMemo(
-    () => Boolean(templateFile && question.trim() && answer.trim()),
-    [templateFile, question, answer]
+    () => Boolean(templateFile && question.trim() && answer.trim() && !isGenerating),
+    [templateFile, question, answer, isGenerating]
   );
 
   function handleTemplateChange(event) {
     const file = event.target.files?.[0];
     setError("");
+    setAudioResult(null);
 
     if (!file) {
       setTemplateFile(null);
@@ -50,9 +54,10 @@ function App() {
     setTemplateFile(file);
   }
 
-  function handleGenerate(event) {
+  async function handleGenerate(event) {
     event.preventDefault();
     setError("");
+    setAudioResult(null);
 
     if (!templateFile) {
       setError("Upload a template image first.");
@@ -69,7 +74,42 @@ function App() {
       return;
     }
 
-    setError("Video generation is the next implementation step.");
+    const formData = new FormData();
+    formData.append("template", templateFile);
+    formData.append("question", question.trim());
+    formData.append("answer", answer.trim());
+
+    setIsGenerating(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Audio generation failed.");
+      }
+
+      setAudioResult({
+        questionAudioUrl: `${API_BASE_URL}${data.questionAudioUrl}`,
+        answerAudioUrl: `${API_BASE_URL}${data.answerAudioUrl}`,
+        questionVoice: data.questionVoice,
+        answerVoice: data.answerVoice,
+        questionAudioBytes: data.questionAudioBytes,
+        answerAudioBytes: data.answerAudioBytes
+      });
+    } catch (generationError) {
+      setError(
+        generationError instanceof Error
+          ? generationError.message
+          : "Audio generation failed."
+      );
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   return (
@@ -141,9 +181,35 @@ function App() {
           {error && <p className="error-message">{error}</p>}
 
           <button className="generate-button" type="submit" disabled={!canGenerate}>
-            Generate Video
+            {isGenerating ? "Generating Audio..." : "Generate Audio"}
           </button>
         </form>
+
+        {audioResult && (
+          <section className="audio-result" aria-live="polite">
+            <h2>Audio generated</h2>
+
+            <div className="audio-item">
+              <div>
+                <strong>Question · Male</strong>
+                <small>{audioResult.questionVoice}</small>
+              </div>
+              <audio controls src={audioResult.questionAudioUrl} />
+            </div>
+
+            <div className="audio-item">
+              <div>
+                <strong>Answer · Female</strong>
+                <small>{audioResult.answerVoice}</small>
+              </div>
+              <audio controls src={audioResult.answerAudioUrl} />
+            </div>
+
+            <p className="success-message">
+              Both audio tracks were generated successfully. Video rendering is the next step.
+            </p>
+          </section>
+        )}
       </section>
     </main>
   );
