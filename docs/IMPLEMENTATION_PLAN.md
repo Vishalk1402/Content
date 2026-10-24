@@ -6,6 +6,30 @@ Finish one working path: image + Question + Answer → male Question audio + fem
 
 The timebox is one day. If time is running out, prioritize a correct final MP4 over extra UI polish.
 
+## Progress
+
+**Current status:** Documentation complete — implementation not started.
+
+**Overall:** 0/5 implementation steps complete.
+
+| Step | Status | Progress |
+|---|---|---|
+| Step 0 — inspect the real assets | ⬜ Not started | 0/5 |
+| Step 1 — project skeleton and UI | ⬜ Not started | 0/5 |
+| Step 2 — voice generation | ⬜ Not started | 0/4 |
+| Step 3 — timing and text animation | ⬜ Not started | 0/6 |
+| Step 4 — final rendering | ⬜ Not started | 0/4 |
+| Step 5 — manual verification and cleanup | ⬜ Not started | 0/4 |
+
+### Status legend
+
+- ⬜ Not started
+- 🟡 In progress
+- 🟢 Complete
+- 🔴 Blocked
+
+Update this section whenever a step is validated. Do not mark a step complete until its checkpoint has been manually verified.
+
 ## Step 0 — inspect the real assets (first)
 
 - [ ] Use the actual template image the user will upload.
@@ -15,6 +39,8 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 - [ ] Confirm whether a usable male/female voice pair is available in the chosen TTS provider.
 
 **Checkpoint:** the template layout and voices are known well enough to render a first output.
+
+**Status:** ⬜ Not started
 
 ## Step 1 — project skeleton and UI
 
@@ -26,6 +52,8 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 **Checkpoint:** inputs validate and display correctly.
 
+**Status:** ⬜ Not started
+
 ## Step 2 — voice generation
 
 - [ ] Generate Question audio with the selected male-sounding voice.
@@ -34,6 +62,8 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 - [ ] Confirm both audio files can be played and have non-zero duration.
 
 **Checkpoint:** two valid, distinct audio files are generated.
+
+**Status:** ⬜ Not started
 
 ## Step 3 — timing and text animation
 
@@ -46,6 +76,8 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 **Checkpoint:** visual order matches the audio order, and text stays in the intended regions.
 
+**Status:** ⬜ Not started
+
 ## Step 4 — final rendering
 
 - [ ] Combine image, animation, and audio with FFmpeg or the selected lightweight renderer.
@@ -55,12 +87,16 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 **Checkpoint:** one complete MP4 can be opened and played.
 
+**Status:** ⬜ Not started
+
 ## Step 5 — manual verification and cleanup
 
 - [ ] Run all required tests in [TESTING.md](./TESTING.md).
 - [ ] Fix only blockers to the Definition of Done.
 - [ ] Confirm no secrets, uploaded assets, or generated media are committed.
 - [ ] Update this document's status and record the final command used to run the app.
+
+**Status:** ⬜ Not started
 
 ## Timebox guidance
 
