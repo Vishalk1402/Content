@@ -8,14 +8,14 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Step 0 is partially validated; implementation setup is next.
+**Current status:** Step 1 is implemented and ready for manual validation; Step 0 remains partially validated because the actual first template layout and TTS voices still need final confirmation.
 
 **Overall:** 0/5 implementation steps complete.
 
 | Step | Status | Progress |
 |---|---|---|
 | Step 0 — inspect the real assets | 🟡 In progress | 3/5 |
-| Step 1 — project skeleton and UI | ⬜ Not started | 0/5 |
+| Step 1 — project skeleton and UI | 🟡 In progress | 5/5 implementation items; checkpoint pending manual test |
 | Step 2 — voice generation | ⬜ Not started | 0/4 |
 | Step 3 — timing and text animation | ⬜ Not started | 0/6 |
 | Step 4 — final rendering | ⬜ Not started | 0/4 |
@@ -45,19 +45,21 @@ Update this section whenever a step is validated. Do not mark a step complete un
 
 ### Step 0 decision
 
-The renderer will use a reusable `TemplateConfig` rather than hardcoding the reference image's coordinates. Each template can have its own image and configuration. The reference image establishes the general 9:16 visual pattern, but it is not the only supported template.
+The renderer will use a reusable `TemplateConfig` rather than hardcoding the reference image's coordinates. Each template can have its own image and configuration. The supplied reference image is now the first implementation target for the visual configuration.
 
 ## Step 1 — project skeleton and UI
 
-- [ ] Create the smallest React/JavaScript UI.
-- [ ] Add image picker and image preview.
-- [ ] Add Question and Answer multiline inputs.
-- [ ] Add Generate button and clear validation/errors.
-- [ ] Add loading/success state and final video preview/download placeholder.
+- [x] Create the smallest React/JavaScript UI.
+- [x] Add image picker and image preview.
+- [x] Add Question and Answer multiline inputs.
+- [x] Add Generate button and clear validation/errors.
+- [x] Add loading/success state and final video preview/download placeholder.
 
 **Checkpoint:** inputs validate and display correctly.
 
-**Status:** ⬜ Not started
+**Implementation:** React + Vite client, Node/Express local API skeleton, fixed first-template configuration, and local generated-file ignores are now in the repository.
+
+**Status:** 🟡 In progress — manual validation pending.
 
 ## Step 2 — voice generation
 
