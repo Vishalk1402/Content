@@ -1,7 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const API_BASE_URL = "http://127.0.0.1:3001";
+const TEMPLATE_CONFIG = {
+  canvas: { width: 1080, height: 1920 },
+  gapSeconds: 0.45,
+  question: { x: 90, y: 430, width: 900 },
+  answer: { x: 90, y: 700, width: 900 }
+};
+
+function getVisibleText(text, progress) {
+  const count = Math.max(0, Math.min(text.length, Math.round(text.length * progress)));
+  return text.slice(0, count);
+}
 
 function App() {
   const [templateFile, setTemplateFile] = useState(null);
@@ -11,6 +22,12 @@ function App() {
   const [previewUrl, setPreviewUrl] = useState("");
   const [audioResult, setAudioResult] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [durations, setDurations] = useState({ question: 0, answer: 0 });
+  const [previewState, setPreviewState] = useState("idle");
+  const [segmentProgress, setSegmentProgress] = useState(0);
+  const questionAudioRef = useRef(null);
+  const answerAudioRef = useRef(null);
+  const gapTimerRef = useRef(null);
 
   useEffect(() => {
     if (!templateFile) {
@@ -24,6 +41,8 @@ function App() {
     return () => URL.revokeObjectURL(url);
   }, [templateFile]);
 
+  useEffect(() => () => clearTimeout(gapTimerRef.current), []);
+
   const canGenerate = useMemo(
     () => Boolean(templateFile && question.trim() && answer.trim() && !isGenerating),
     [templateFile, question, answer, isGenerating]
@@ -33,6 +52,7 @@ function App() {
     const file = event.target.files?.[0];
     setError("");
     setAudioResult(null);
+    setPreviewState("idle");
 
     if (!file) {
       setTemplateFile(null);
@@ -54,10 +74,71 @@ function App() {
     setTemplateFile(file);
   }
 
+  function handleQuestionTimeUpdate() {
+    const audio = questionAudioRef.current;
+    if (!audio?.duration) return;
+    setSegmentProgress(Math.min(1, audio.currentTime / audio.duration));
+  }
+
+  function handleAnswerTimeUpdate() {
+    const audio = answerAudioRef.current;
+    if (!audio?.duration) return;
+    setSegmentProgress(Math.min(1, audio.currentTime / audio.duration));
+  }
+
+  function handleQuestionEnded() {
+    const answerAudio = answerAudioRef.current;
+    if (!answerAudio) return;
+
+    setPreviewState("gap");
+    setSegmentProgress(1);
+
+    gapTimerRef.current = setTimeout(() => {
+      setPreviewState("answer");
+      setSegmentProgress(0);
+      answerAudio.currentTime = 0;
+      answerAudio.play().catch(() => setPreviewState("idle"));
+    }, TEMPLATE_CONFIG.gapSeconds * 1000);
+  }
+
+  function handleAnswerEnded() {
+    setSegmentProgress(1);
+    setPreviewState("complete");
+  }
+
+  async function handlePreview() {
+    const questionAudio = questionAudioRef.current;
+    const answerAudio = answerAudioRef.current;
+    if (!questionAudio || !answerAudio) return;
+
+    clearTimeout(gapTimerRef.current);
+    answerAudio.pause();
+    answerAudio.currentTime = 0;
+    questionAudio.currentTime = 0;
+    setSegmentProgress(0);
+    setPreviewState("question");
+
+    try {
+      await questionAudio.play();
+    } catch {
+      setPreviewState("idle");
+      setError("The browser blocked audio playback. Click Preview again to allow playback.");
+    }
+  }
+
+  function handleStopPreview() {
+    clearTimeout(gapTimerRef.current);
+    questionAudioRef.current?.pause();
+    answerAudioRef.current?.pause();
+    setPreviewState("idle");
+    setSegmentProgress(0);
+  }
+
   async function handleGenerate(event) {
     event.preventDefault();
     setError("");
     setAudioResult(null);
+    setPreviewState("idle");
 
     if (!templateFile) {
       setError("Upload a template image first.");
@@ -93,6 +174,7 @@ function App() {
         throw new Error(data.error || "Audio generation failed.");
       }
 
+      setDurations({ question: 0, answer: 0 });
       setAudioResult({
         questionAudioUrl: `${API_BASE_URL}${data.questionAudioUrl}`,
         answerAudioUrl: `${API_BASE_URL}${data.answerAudioUrl}`,
@@ -111,6 +193,16 @@ function App() {
       setIsGenerating(false);
     }
   }
+
+  const questionVisibleText =
+    previewState === "answer" || previewState === "complete"
+      ? question.trim()
+      : getVisibleText(question.trim(), previewState === "question" ? segmentProgress : 0);
+
+  const answerVisibleText =
+    previewState === "complete"
+      ? answer.trim()
+      : getVisibleText(answer.trim(), previewState === "answer" ? segmentProgress : 0);
 
   return (
     <main className="app-shell">
@@ -189,24 +281,67 @@ function App() {
           <section className="audio-result" aria-live="polite">
             <h2>Audio generated</h2>
 
-            <div className="audio-item">
-              <div>
-                <strong>Question · Male</strong>
-                <small>{audioResult.questionVoice}</small>
-              </div>
-              <audio controls src={audioResult.questionAudioUrl} />
+            <audio
+              ref={questionAudioRef}
+              src={audioResult.questionAudioUrl}
+              onLoadedMetadata={(event) =>
+                setDurations((current) => ({ ...current, question: event.currentTarget.duration }))
+              }
+              onTimeUpdate={handleQuestionTimeUpdate}
+              onEnded={handleQuestionEnded}
+            />
+
+            <audio
+              ref={answerAudioRef}
+              src={audioResult.answerAudioUrl}
+              onLoadedMetadata={(event) =>
+                setDurations((current) => ({ ...current, answer: event.currentTarget.duration }))
+              }
+              onTimeUpdate={handleAnswerTimeUpdate}
+              onEnded={handleAnswerEnded}
+            />
+
+            <div className="preview-controls">
+              <button type="button" onClick={handlePreview}>
+                Preview Animation
+              </button>
+              <button type="button" onClick={handleStopPreview} className="secondary-button">
+                Stop
+              </button>
             </div>
 
-            <div className="audio-item">
-              <div>
-                <strong>Answer · Female</strong>
-                <small>{audioResult.answerVoice}</small>
+            <div className="video-preview" style={{ aspectRatio: `${TEMPLATE_CONFIG.canvas.width} / ${TEMPLATE_CONFIG.canvas.height}` }}>
+              <img src={previewUrl} alt="Template animation preview" />
+              <div
+                className="template-text question-text"
+                style={{
+                  left: `${(TEMPLATE_CONFIG.question.x / TEMPLATE_CONFIG.canvas.width) * 100}%`,
+                  top: `${(TEMPLATE_CONFIG.question.y / TEMPLATE_CONFIG.canvas.height) * 100}%`,
+                  width: `${(TEMPLATE_CONFIG.question.width / TEMPLATE_CONFIG.canvas.width) * 100}%`
+                }}
+              >
+                {questionVisibleText}
               </div>
-              <audio controls src={audioResult.answerAudioUrl} />
+              <div
+                className="template-text answer-text"
+                style={{
+                  left: `${(TEMPLATE_CONFIG.answer.x / TEMPLATE_CONFIG.canvas.width) * 100}%`,
+                  top: `${(TEMPLATE_CONFIG.answer.y / TEMPLATE_CONFIG.canvas.height) * 100}%`,
+                  width: `${(TEMPLATE_CONFIG.answer.width / TEMPLATE_CONFIG.canvas.width) * 100}%`
+                }}
+              >
+                {answerVisibleText}
+              </div>
+            </div>
+
+            <div className="timing-summary">
+              <span>Question: {durations.question ? `${durations.question.toFixed(2)}s` : "loading..."}</span>
+              <span>Gap: {TEMPLATE_CONFIG.gapSeconds.toFixed(2)}s</span>
+              <span>Answer: {durations.answer ? `${durations.answer.toFixed(2)}s` : "loading..."}</span>
             </div>
 
             <p className="success-message">
-              Both audio tracks were generated successfully. Video rendering is the next step.
+              Audio and typewriter timing are ready. Final MP4 rendering is the next step.
             </p>
           </section>
         )}
