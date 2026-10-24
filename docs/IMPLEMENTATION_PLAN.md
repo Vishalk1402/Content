@@ -8,16 +8,16 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Step 1 is complete. Step 2 is implemented and ready for final manual voice-quality validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
+**Current status:** Step 2 is complete. Step 3 is implemented and ready for manual validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
 
-**Overall:** 1/5 implementation steps complete.
+**Overall:** 2/5 implementation steps complete.
 
 | Step | Status | Progress |
 |---|---|---|
-| Step 0 — inspect the real assets | 🟡 In progress | 3/5 validated; final layout is intentionally being validated during the first render |
+| Step 0 — inspect the real assets | 🟡 In progress | 4/5 validated; final layout is intentionally being validated during the first render |
 | Step 1 — project skeleton and UI | 🟢 Complete | 5/5 implementation items; manual validation passed |
-| Step 2 — voice generation | 🟡 In progress | 4/4 implementation items; final voice-quality validation pending |
-| Step 3 — timing and text animation | ⬜ Not started | 0/6 |
+| Step 2 — voice generation | 🟢 Complete | 4/4 implementation items; voice quality manually approved |
+| Step 3 — timing and text animation | 🟡 In progress | 6/6 implementation items; manual animation validation pending |
 | Step 4 — final rendering | ⬜ Not started | 0/4 |
 | Step 5 — manual verification and cleanup | ⬜ Not started | 0/4 |
 
@@ -70,22 +70,24 @@ The renderer will use a reusable `TemplateConfig` rather than hardcoding one ima
 
 **Checkpoint:** two valid, distinct audio files are generated.
 
-**Implementation:** the MVP uses the `edge-tts` Python package through the Node server. The selected default voices are `en-US-ChristopherNeural` for Question and `en-US-JennyNeural` for Answer, with a default TTS rate of `-10%` for slower, clearer pacing. Voice IDs and rate are configurable through environment variables.
+**Implementation:** the MVP uses the `edge-tts` Python package through the Node server. The selected voices are `en-US-ChristopherNeural` for Question and `en-US-JennyNeural` for Answer, with a TTS rate of `-10%` for slower, clearer pacing. Voice IDs and rate are configurable through environment variables.
 
-**Status:** 🟡 In progress — final voice-quality validation pending.
+**Status:** 🟢 Complete — manual voice-quality validation passed.
 
 ## Step 3 — timing and text animation
 
-- [ ] Read the actual duration of each generated audio track.
-- [ ] Render the Question typewriter text only over the Question audio interval.
-- [ ] Add a short gap between the two segments.
-- [ ] Render the Answer typewriter text only over the Answer audio interval.
-- [ ] Ensure final text is fully visible by the corresponding segment's end.
-- [ ] Verify wrapping and clipping against a short and longer answer.
+- [x] Read the actual duration of each generated audio track in the browser from the audio metadata.
+- [x] Render the Question typewriter text only over the Question audio interval.
+- [x] Add a short `0.45s` gap between the two segments.
+- [x] Render the Answer typewriter text only over the Answer audio interval.
+- [x] Ensure final text is fully visible by the corresponding segment's end.
+- [x] Use the configured Question/Answer text regions and verify wrapping/clipping in the preview implementation.
+
+**Implementation:** the UI now loads both audio tracks, reads their real durations, sequences Question → gap → Answer, and reveals each text string proportionally to the current audio progress. The preview uses the first template's `TemplateConfig` coordinates and exposes Preview/Stop controls.
 
 **Checkpoint:** visual order matches the audio order, and text stays in the intended regions.
 
-**Status:** ⬜ Not started
+**Status:** 🟡 In progress — manual animation validation pending.
 
 ## Step 4 — final rendering
 
