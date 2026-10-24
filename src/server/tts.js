@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 
 const pythonBin = process.env.PYTHON_BIN || "python";
-const questionVoice = process.env.QUESTION_VOICE || "en-US-GuyNeural";
-const answerVoice = process.env.ANSWER_VOICE || "en-US-JennyNeural";
+const questionVoice = process.env.QUESTION_VOICE || "en-US-Andrew2:DragonHDLatestNeural";
+const answerVoice = process.env.ANSWER_VOICE || "en-US-Emma2:DragonHDLatestNeural";
 
 function generateWithEdgeTts({ text, voice, outputPath }) {
   return new Promise((resolve, reject) => {
