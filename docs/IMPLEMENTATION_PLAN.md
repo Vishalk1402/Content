@@ -8,7 +8,7 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Step 1 is complete. Step 2 is implemented and ready for manual validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
+**Current status:** Step 1 is complete. Step 2 is implemented and ready for final manual voice-quality validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
 
 **Overall:** 1/5 implementation steps complete.
 
@@ -16,7 +16,7 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 |---|---|---|
 | Step 0 — inspect the real assets | 🟡 In progress | 3/5 validated; final layout is intentionally being validated during the first render |
 | Step 1 — project skeleton and UI | 🟢 Complete | 5/5 implementation items; manual validation passed |
-| Step 2 — voice generation | 🟡 In progress | 4/4 implementation items; manual audio playback pending |
+| Step 2 — voice generation | 🟡 In progress | 4/4 implementation items; final voice-quality validation pending |
 | Step 3 — timing and text animation | ⬜ Not started | 0/6 |
 | Step 4 — final rendering | ⬜ Not started | 0/4 |
 | Step 5 — manual verification and cleanup | ⬜ Not started | 0/4 |
@@ -37,7 +37,7 @@ Update this section whenever a step is validated. Do not mark a step complete un
 - [x] Confirm that the reference is only one example and that different templates must be supported.
 - [ ] Identify the actual first template's dimensions, existing text, and available Question/Answer text regions.
 - [ ] Choose text boxes, font sizes, colors, and wrapping based on the actual first template.
-- [ ] Confirm whether a usable male/female voice pair is available in the chosen TTS provider.
+- [x] Confirm a usable male/female voice pair is available in the chosen TTS provider.
 
 **Checkpoint:** the actual first template layout and voices are known well enough to render a first output.
 
@@ -70,9 +70,9 @@ The renderer will use a reusable `TemplateConfig` rather than hardcoding one ima
 
 **Checkpoint:** two valid, distinct audio files are generated.
 
-**Implementation:** the MVP uses the `edge-tts` Python package through the Node server. Default voices are `en-US-GuyNeural` for Question and `en-US-JennyNeural` for Answer. Voice IDs are configurable through environment variables.
+**Implementation:** the MVP uses the `edge-tts` Python package through the Node server. The selected default voices are `en-US-ChristopherNeural` for Question and `en-US-JennyNeural` for Answer, with a default TTS rate of `-10%` for slower, clearer pacing. Voice IDs and rate are configurable through environment variables.
 
-**Status:** 🟡 In progress — manual generation and playback pending.
+**Status:** 🟡 In progress — final voice-quality validation pending.
 
 ## Step 3 — timing and text animation
 
