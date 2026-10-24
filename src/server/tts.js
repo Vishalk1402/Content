@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 
 const pythonBin = process.env.PYTHON_BIN || "python";
-const questionVoice = process.env.QUESTION_VOICE || "en-US-Andrew2:DragonHDLatestNeural";
-const answerVoice = process.env.ANSWER_VOICE || "en-US-Emma2:DragonHDLatestNeural";
+const questionVoice = process.env.QUESTION_VOICE || "en-US-ChristopherNeural";
+const answerVoice = process.env.ANSWER_VOICE || "en-US-JennyNeural";
+const ttsRate = process.env.TTS_RATE || "-10%";
 
 function generateWithEdgeTts({ text, voice, outputPath }) {
   return new Promise((resolve, reject) => {
@@ -11,6 +12,8 @@ function generateWithEdgeTts({ text, voice, outputPath }) {
       "edge_tts",
       "--voice",
       voice,
+      "--rate",
+      ttsRate,
       "--text",
       text,
       "--write-media",
@@ -72,6 +75,7 @@ export async function generateQuestionAndAnswerAudio({
 
   return {
     questionVoice,
-    answerVoice
+    answerVoice,
+    ttsRate
   };
 }
