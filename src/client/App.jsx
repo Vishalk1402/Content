@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const API_BASE_URL = "http://127.0.0.1:3001";
+
 const TEMPLATE_CONFIG = {
   canvas: { width: 1080, height: 1920 },
   gapSeconds: 0.45,
@@ -10,8 +11,17 @@ const TEMPLATE_CONFIG = {
 };
 
 function getVisibleText(text, progress) {
-  const count = Math.max(0, Math.min(text.length, Math.round(text.length * progress)));
-  return text.slice(0, count);
+  if (!text) {
+    return "";
+  }
+
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+
+  const targetLength = Math.floor(
+    text.length * clampedProgress
+  );
+
+  return text.slice(0, targetLength);
 }
 
 function App() {
@@ -22,12 +32,17 @@ function App() {
   const [previewUrl, setPreviewUrl] = useState("");
   const [audioResult, setAudioResult] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [durations, setDurations] = useState({ question: 0, answer: 0 });
+  const [durations, setDurations] = useState({
+    question: 0,
+    answer: 0
+  });
   const [previewState, setPreviewState] = useState("idle");
   const [segmentProgress, setSegmentProgress] = useState(0);
+
   const questionAudioRef = useRef(null);
   const answerAudioRef = useRef(null);
   const gapTimerRef = useRef(null);
+  const animationFrameRef = useRef(null);
 
   useEffect(() => {
     if (!templateFile) {
@@ -41,15 +56,27 @@ function App() {
     return () => URL.revokeObjectURL(url);
   }, [templateFile]);
 
-  useEffect(() => () => clearTimeout(gapTimerRef.current), []);
+  useEffect(() => {
+    return () => {
+      clearTimeout(gapTimerRef.current);
+      cancelAnimationFrame(animationFrameRef.current);
+    };
+  }, []);
 
   const canGenerate = useMemo(
-    () => Boolean(templateFile && question.trim() && answer.trim() && !isGenerating),
+    () =>
+      Boolean(
+        templateFile &&
+        question.trim() &&
+        answer.trim() &&
+        !isGenerating
+      ),
     [templateFile, question, answer, isGenerating]
   );
 
   function handleTemplateChange(event) {
     const file = event.target.files?.[0];
+
     setError("");
     setAudioResult(null);
     setPreviewState("idle");
@@ -74,47 +101,68 @@ function App() {
     setTemplateFile(file);
   }
 
-  function handleQuestionTimeUpdate() {
-    const audio = questionAudioRef.current;
-
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+  function updateTypewriter(audio) {
+    if (
+      !audio ||
+      !Number.isFinite(audio.duration) ||
+      audio.duration <= 0
+    ) {
       return;
     }
 
-    setSegmentProgress(
-      Math.min(1, audio.currentTime / audio.duration)
+    const progress = Math.min(
+      1,
+      Math.max(0, audio.currentTime / audio.duration)
     );
-  }
 
-  function handleAnswerTimeUpdate() {
-    const audio = answerAudioRef.current;
+    setSegmentProgress(progress);
 
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
-      return;
+    if (!audio.paused && !audio.ended) {
+      animationFrameRef.current = requestAnimationFrame(() => {
+        updateTypewriter(audio);
+      });
     }
-
-    setSegmentProgress(
-      Math.min(1, audio.currentTime / audio.duration)
-    );
   }
 
   function handleQuestionEnded() {
+    cancelAnimationFrame(animationFrameRef.current);
+
     const answerAudio = answerAudioRef.current;
-    if (!answerAudio) return;
 
-    // Keep the question fully visible during the transition gap.
-    setPreviewState("gap");
+    if (!answerAudio) {
+      return;
+    }
+
+    // Keep the complete question visible.
     setSegmentProgress(1);
+    setPreviewState("gap");
 
-    gapTimerRef.current = setTimeout(() => {
+    clearTimeout(gapTimerRef.current);
+
+    gapTimerRef.current = setTimeout(async () => {
       setPreviewState("answer");
       setSegmentProgress(0);
+
       answerAudio.currentTime = 0;
-      answerAudio.play().catch(() => setPreviewState("idle"));
+
+      try {
+        await answerAudio.play();
+
+        cancelAnimationFrame(animationFrameRef.current);
+
+        animationFrameRef.current =
+          requestAnimationFrame(() => {
+            updateTypewriter(answerAudio);
+          });
+      } catch {
+        setPreviewState("idle");
+      }
     }, TEMPLATE_CONFIG.gapSeconds * 1000);
   }
-
+  
   function handleAnswerEnded() {
+    cancelAnimationFrame(animationFrameRef.current);
+
     setSegmentProgress(1);
     setPreviewState("complete");
   }
@@ -122,33 +170,53 @@ function App() {
   async function handlePreview() {
     const questionAudio = questionAudioRef.current;
     const answerAudio = answerAudioRef.current;
-    if (!questionAudio || !answerAudio) return;
+
+    if (!questionAudio || !answerAudio) {
+      return;
+    }
 
     clearTimeout(gapTimerRef.current);
+    cancelAnimationFrame(animationFrameRef.current);
+
     answerAudio.pause();
     answerAudio.currentTime = 0;
+
+    questionAudio.pause();
     questionAudio.currentTime = 0;
+
     setSegmentProgress(0);
     setPreviewState("question");
 
     try {
       await questionAudio.play();
+
+      cancelAnimationFrame(animationFrameRef.current);
+
+      animationFrameRef.current = requestAnimationFrame(() => {
+        updateTypewriter(questionAudio);
+      });
     } catch {
       setPreviewState("idle");
-      setError("The browser blocked audio playback. Click Preview again to allow playback.");
+      setError(
+        "The browser blocked audio playback. Click Preview again to allow playback."
+      );
     }
   }
 
   function handleStopPreview() {
     clearTimeout(gapTimerRef.current);
+    cancelAnimationFrame(animationFrameRef.current);
+
     questionAudioRef.current?.pause();
     answerAudioRef.current?.pause();
+
     setPreviewState("idle");
     setSegmentProgress(0);
   }
 
   async function handleGenerate(event) {
     event.preventDefault();
+
     setError("");
     setAudioResult(null);
     setPreviewState("idle");
@@ -169,6 +237,7 @@ function App() {
     }
 
     const formData = new FormData();
+
     formData.append("template", templateFile);
     formData.append("question", question.trim());
     formData.append("answer", answer.trim());
@@ -176,18 +245,27 @@ function App() {
     setIsGenerating(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/generate`, {
-        method: "POST",
-        body: formData
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/generate`,
+        {
+          method: "POST",
+          body: formData
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Audio generation failed.");
+        throw new Error(
+          data.error || "Audio generation failed."
+        );
       }
 
-      setDurations({ question: 0, answer: 0 });
+      setDurations({
+        question: 0,
+        answer: 0
+      });
+
       setAudioResult({
         questionAudioUrl: `${API_BASE_URL}${data.questionAudioUrl}`,
         answerAudioUrl: `${API_BASE_URL}${data.answerAudioUrl}`,
@@ -207,41 +285,62 @@ function App() {
     }
   }
 
+  const formattedQuestion = `Q. ${question.trim()}`;
+
   const questionVisibleText =
-    previewState === "answer" ||
-      previewState === "gap" ||
-      previewState === "complete"
-      ? `Q. ${question.trim()}`
-      : getVisibleText(
-        `Q. ${question.trim()}`,
-        previewState === "question" ? segmentProgress : 0
-      );
+    previewState === "question"
+      ? getVisibleText(
+        formattedQuestion,
+        segmentProgress
+      )
+      : previewState === "gap" ||
+        previewState === "answer" ||
+        previewState === "complete"
+        ? formattedQuestion
+        : "";
 
   const answerVisibleText =
-    previewState === "complete"
-      ? answer.trim()
-      : getVisibleText(answer.trim(), previewState === "answer" ? segmentProgress : 0);
+    previewState === "answer"
+      ? getVisibleText(
+        answer.trim(),
+        segmentProgress
+      )
+      : previewState === "complete"
+        ? answer.trim()
+        : "";
 
   return (
     <main className="app-shell">
       <section className="app-card">
         <header className="header">
           <p className="eyebrow">devwithvk</p>
+
           <h1>Q&A Video Generator</h1>
+
           <p className="subtitle">
-            Upload a template, enter your Question and Answer, then generate a
-            short-form video with separate voices and typewriter animation.
+            Upload a template, enter your Question and Answer,
+            then generate a short-form video with separate voices
+            and typewriter animation.
           </p>
         </header>
 
-        <form onSubmit={handleGenerate} className="generator-form">
+        <form
+          onSubmit={handleGenerate}
+          className="generator-form"
+        >
           <div className="field-group">
             <div className="field-heading">
-              <label htmlFor="template">Template image</label>
+              <label htmlFor="template">
+                Template image
+              </label>
+
               <span>PNG, JPG or WebP</span>
             </div>
 
-            <label className={`upload-box ${previewUrl ? "has-preview" : ""}`}>
+            <label
+              className={`upload-box ${previewUrl ? "has-preview" : ""
+                }`}
+            >
               <input
                 id="template"
                 type="file"
@@ -250,11 +349,19 @@ function App() {
               />
 
               {previewUrl ? (
-                <img src={previewUrl} alt="Selected template preview" />
+                <img
+                  src={previewUrl}
+                  alt="Selected template preview"
+                />
               ) : (
                 <span className="upload-placeholder">
-                  <strong>Choose template image</strong>
-                  <small>Your template controls the visual design.</small>
+                  <strong>
+                    Choose template image
+                  </strong>
+
+                  <small>
+                    Your template controls the visual design.
+                  </small>
                 </span>
               )}
             </label>
@@ -262,13 +369,19 @@ function App() {
 
           <div className="field-group">
             <div className="field-heading">
-              <label htmlFor="question">Question</label>
+              <label htmlFor="question">
+                Question
+              </label>
+
               <span>Male voice</span>
             </div>
+
             <textarea
               id="question"
               value={question}
-              onChange={(event) => setQuestion(event.target.value)}
+              onChange={(event) =>
+                setQuestion(event.target.value)
+              }
               placeholder="What is ALTER?"
               rows={4}
             />
@@ -276,27 +389,46 @@ function App() {
 
           <div className="field-group">
             <div className="field-heading">
-              <label htmlFor="answer">Answer</label>
+              <label htmlFor="answer">
+                Answer
+              </label>
+
               <span>Female voice</span>
             </div>
+
             <textarea
               id="answer"
               value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
+              onChange={(event) =>
+                setAnswer(event.target.value)
+              }
               placeholder="ALTER is a DDL command used to modify the structure of an existing table."
               rows={7}
             />
           </div>
 
-          {error && <p className="error-message">{error}</p>}
+          {error && (
+            <p className="error-message">
+              {error}
+            </p>
+          )}
 
-          <button className="generate-button" type="submit" disabled={!canGenerate}>
-            {isGenerating ? "Generating Audio..." : "Generate Audio"}
+          <button
+            className="generate-button"
+            type="submit"
+            disabled={!canGenerate}
+          >
+            {isGenerating
+              ? "Generating Audio..."
+              : "Generate Audio"}
           </button>
         </form>
 
         {audioResult && (
-          <section className="audio-result" aria-live="polite">
+          <section
+            className="audio-result"
+            aria-live="polite"
+          >
             <h2>Audio generated</h2>
 
             <audio
@@ -304,16 +436,19 @@ function App() {
               src={audioResult.questionAudioUrl}
               preload="metadata"
               onLoadedMetadata={(event) => {
-                const duration = event.currentTarget?.duration;
+                const duration =
+                  event.currentTarget?.duration;
 
-                if (Number.isFinite(duration) && duration > 0) {
+                if (
+                  Number.isFinite(duration) &&
+                  duration > 0
+                ) {
                   setDurations((current) => ({
                     ...current,
                     question: duration
                   }));
                 }
               }}
-              onTimeUpdate={handleQuestionTimeUpdate}
               onEnded={handleQuestionEnded}
             />
 
@@ -322,46 +457,85 @@ function App() {
               src={audioResult.answerAudioUrl}
               preload="metadata"
               onLoadedMetadata={(event) => {
-                const duration = event.currentTarget?.duration;
+                const duration =
+                  event.currentTarget?.duration;
 
-                if (Number.isFinite(duration) && duration > 0) {
+                if (
+                  Number.isFinite(duration) &&
+                  duration > 0
+                ) {
                   setDurations((current) => ({
                     ...current,
                     answer: duration
                   }));
                 }
               }}
-              onTimeUpdate={handleAnswerTimeUpdate}
               onEnded={handleAnswerEnded}
             />
 
             <div className="preview-controls">
-              <button type="button" onClick={handlePreview}>
+              <button
+                type="button"
+                onClick={handlePreview}
+              >
                 Preview Animation
               </button>
-              <button type="button" onClick={handleStopPreview} className="secondary-button">
+
+              <button
+                type="button"
+                onClick={handleStopPreview}
+                className="secondary-button"
+              >
                 Stop
               </button>
             </div>
 
-            <div className="video-preview" style={{ aspectRatio: `${TEMPLATE_CONFIG.canvas.width} / ${TEMPLATE_CONFIG.canvas.height}` }}>
-              <img src={previewUrl} alt="Template animation preview" />
+            <div
+              className="video-preview"
+              style={{
+                aspectRatio: `${TEMPLATE_CONFIG.canvas.width} / ${TEMPLATE_CONFIG.canvas.height}`
+              }}
+            >
+              <img
+                src={previewUrl}
+                alt="Template animation preview"
+              />
+
               <div
                 className="template-text question-text"
                 style={{
-                  left: `${(TEMPLATE_CONFIG.question.x / TEMPLATE_CONFIG.canvas.width) * 100}%`,
-                  top: `${(TEMPLATE_CONFIG.question.y / TEMPLATE_CONFIG.canvas.height) * 100}%`,
-                  width: `${(TEMPLATE_CONFIG.question.width / TEMPLATE_CONFIG.canvas.width) * 100}%`
+                  left: `${(TEMPLATE_CONFIG.question.x /
+                    TEMPLATE_CONFIG.canvas.width) *
+                    100
+                    }%`,
+                  top: `${(TEMPLATE_CONFIG.question.y /
+                    TEMPLATE_CONFIG.canvas.height) *
+                    100
+                    }%`,
+                  width: `${(TEMPLATE_CONFIG.question.width /
+                    TEMPLATE_CONFIG.canvas.width) *
+                    100
+                    }%`
                 }}
               >
                 {questionVisibleText}
               </div>
+
               <div
                 className="template-text answer-text"
                 style={{
-                  left: `${(TEMPLATE_CONFIG.answer.x / TEMPLATE_CONFIG.canvas.width) * 100}%`,
-                  top: `${(TEMPLATE_CONFIG.answer.y / TEMPLATE_CONFIG.canvas.height) * 100}%`,
-                  width: `${(TEMPLATE_CONFIG.answer.width / TEMPLATE_CONFIG.canvas.width) * 100}%`
+                  left: `${(TEMPLATE_CONFIG.answer.x /
+                    TEMPLATE_CONFIG.canvas.width) *
+                    100
+                    }%`,
+                  top: `${(TEMPLATE_CONFIG.answer.y /
+                    TEMPLATE_CONFIG.canvas.height) *
+                    100
+                    }%`,
+                  width: `${(TEMPLATE_CONFIG.answer.width /
+                    TEMPLATE_CONFIG.canvas.width) *
+                    100
+                    }%`
                 }}
               >
                 {answerVisibleText}
@@ -369,13 +543,29 @@ function App() {
             </div>
 
             <div className="timing-summary">
-              <span>Question: {durations.question ? `${durations.question.toFixed(2)}s` : "loading..."}</span>
-              <span>Gap: {TEMPLATE_CONFIG.gapSeconds.toFixed(2)}s</span>
-              <span>Answer: {durations.answer ? `${durations.answer.toFixed(2)}s` : "loading..."}</span>
+              <span>
+                Question:{" "}
+                {durations.question
+                  ? `${durations.question.toFixed(2)}s`
+                  : "loading..."}
+              </span>
+
+              <span>
+                Gap:{" "}
+                {TEMPLATE_CONFIG.gapSeconds.toFixed(2)}s
+              </span>
+
+              <span>
+                Answer:{" "}
+                {durations.answer
+                  ? `${durations.answer.toFixed(2)}s`
+                  : "loading..."}
+              </span>
             </div>
 
             <p className="success-message">
-              Audio and typewriter timing are ready. Final MP4 rendering is the next step.
+              Audio and typewriter timing are ready.
+              Final MP4 rendering is the next step.
             </p>
           </section>
         )}
