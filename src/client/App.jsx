@@ -4,10 +4,30 @@ const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const API_BASE_URL = "http://127.0.0.1:3001";
 
 const TEMPLATE_CONFIG = {
-  canvas: { width: 1080, height: 1920 },
+  canvas: {
+    width: 1080,
+    height: 1920
+  },
+
   gapSeconds: 0.45,
-  question: { x: 90, y: 250, width: 900 },
-  answer: { x: 90, y: 440, width: 900 }
+
+  question: {
+    x: 90,
+    y: 250,
+    width: 900,
+    fontSize: 42,
+    bold: true,
+    lineHeight: 58
+  },
+
+  answer: {
+    x: 90,
+    y: 380,
+    width: 900,
+    fontSize: 42,
+    bold: false,
+    lineHeight: 58
+  }
 };
 
 function getVisibleText(text, progress) {
@@ -15,51 +35,187 @@ function getVisibleText(text, progress) {
     return "";
   }
 
-  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const clampedProgress = Math.max(
+    0,
+    Math.min(1, progress)
+  );
 
-  const targetLength = Math.floor(
+  const characterCount = Math.floor(
     text.length * clampedProgress
   );
 
-  return text.slice(0, targetLength);
+  return text.slice(0, characterCount);
+}
+
+function waitForAudioReady(audio) {
+  return new Promise((resolve, reject) => {
+    if (
+      audio.readyState >=
+      HTMLMediaElement.HAVE_METADATA
+    ) {
+      resolve();
+      return;
+    }
+
+    const handleLoaded = () => {
+      cleanup();
+      resolve();
+    };
+
+    const handleError = () => {
+      cleanup();
+      reject(
+        new Error(
+          "Failed to load audio for video recording."
+        )
+      );
+    };
+
+    const cleanup = () => {
+      audio.removeEventListener(
+        "loadedmetadata",
+        handleLoaded
+      );
+
+      audio.removeEventListener(
+        "error",
+        handleError
+      );
+    };
+
+    audio.addEventListener(
+      "loadedmetadata",
+      handleLoaded
+    );
+
+    audio.addEventListener(
+      "error",
+      handleError
+    );
+
+    audio.load();
+  });
 }
 
 function App() {
-  const [templateFile, setTemplateFile] = useState(null);
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [error, setError] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [audioResult, setAudioResult] = useState(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [durations, setDurations] = useState({
-    question: 0,
-    answer: 0
-  });
-  const [previewState, setPreviewState] = useState("idle");
-  const [segmentProgress, setSegmentProgress] = useState(0);
+  const [templateFile, setTemplateFile] =
+    useState(null);
 
-  const questionAudioRef = useRef(null);
-  const answerAudioRef = useRef(null);
-  const gapTimerRef = useRef(null);
-  const animationFrameRef = useRef(null);
+  const [question, setQuestion] =
+    useState("");
+
+  const [answer, setAnswer] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const [previewUrl, setPreviewUrl] =
+    useState("");
+
+  const [audioResult, setAudioResult] =
+    useState(null);
+
+  const [isGenerating, setIsGenerating] =
+    useState(false);
+
+  const [isRecording, setIsRecording] =
+    useState(false);
+
+  const [previewState, setPreviewState] =
+    useState("idle");
+
+  const [segmentProgress, setSegmentProgress] =
+    useState(0);
+
+  const [durations, setDurations] =
+    useState({
+      question: 0,
+      answer: 0
+    });
+
+  const [downloadFormat, setDownloadFormat] =
+    useState("");
+
+  const questionAudioRef =
+    useRef(null);
+
+  const answerAudioRef =
+    useRef(null);
+
+  const canvasRef =
+    useRef(null);
+
+  const canvasContextRef =
+    useRef(null);
+
+  const imageRef =
+    useRef(null);
+
+  const gapTimerRef =
+    useRef(null);
+
+  const animationFrameRef =
+    useRef(null);
+
+  const recorderRef =
+    useRef(null);
+
+  const recordingResourcesRef =
+    useRef(null);
 
   useEffect(() => {
     if (!templateFile) {
       setPreviewUrl("");
+      imageRef.current = null;
+
       return undefined;
     }
 
-    const url = URL.createObjectURL(templateFile);
-    setPreviewUrl(url);
+    const url =
+      URL.createObjectURL(templateFile);
 
-    return () => URL.revokeObjectURL(url);
+    setPreviewUrl(url);
+    imageRef.current = null;
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
   }, [templateFile]);
 
   useEffect(() => {
     return () => {
-      clearTimeout(gapTimerRef.current);
-      cancelAnimationFrame(animationFrameRef.current);
+      clearTimeout(
+        gapTimerRef.current
+      );
+
+      cancelAnimationFrame(
+        animationFrameRef.current
+      );
+
+      const resources =
+        recordingResourcesRef.current;
+
+      if (resources) {
+        resources.questionAudio.pause();
+        resources.answerAudio.pause();
+
+        resources.audioContext
+          .close()
+          .catch(() => { });
+
+        resources.stream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        resources.canvasStream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+      }
     };
   }, []);
 
@@ -69,210 +225,722 @@ function App() {
         templateFile &&
         question.trim() &&
         answer.trim() &&
-        !isGenerating
+        !isGenerating &&
+        !isRecording
       ),
-    [templateFile, question, answer, isGenerating]
+    [
+      templateFile,
+      question,
+      answer,
+      isGenerating,
+      isRecording
+    ]
   );
 
-  function handleTemplateChange(event) {
-    const file = event.target.files?.[0];
+  function getCanvasContext() {
+    const canvas =
+      canvasRef.current;
+
+    if (!canvas) {
+      return null;
+    }
+
+    if (!canvasContextRef.current) {
+      canvasContextRef.current =
+        canvas.getContext("2d");
+    }
+
+    return canvasContextRef.current;
+  }
+
+  async function loadTemplateImage() {
+    if (imageRef.current) {
+      return imageRef.current;
+    }
+
+    if (!previewUrl) {
+      throw new Error(
+        "Template image is not available."
+      );
+    }
+
+    const image =
+      new Image();
+
+    await new Promise(
+      (resolve, reject) => {
+        image.onload = resolve;
+
+        image.onerror = () =>
+          reject(
+            new Error(
+              "Failed to load template image."
+            )
+          );
+
+        image.src =
+          previewUrl;
+      }
+    );
+
+    imageRef.current =
+      image;
+
+    return image;
+  }
+
+  function drawText(
+    context,
+    text,
+    config
+  ) {
+    if (!text) {
+      return;
+    }
+
+    const x =
+      config.x;
+
+    const y =
+      config.y;
+
+    const maxWidth =
+      config.width;
+
+    const fontSize =
+      config.fontSize;
+
+    const lineHeight =
+      config.lineHeight;
+
+    context.save();
+
+    context.font =
+      `${config.bold ? "bold " : ""}${fontSize}px Arial`;
+
+    context.fillStyle =
+      "#ffffff";
+
+    context.textBaseline =
+      "top";
+
+    const words =
+      text.split(/\s+/);
+
+    let line = "";
+
+    let lineY =
+      y;
+
+    for (const word of words) {
+      const testLine =
+        line
+          ? `${line} ${word}`
+          : word;
+
+      const width =
+        context.measureText(
+          testLine
+        ).width;
+
+      if (
+        width > maxWidth &&
+        line
+      ) {
+        context.fillText(
+          line,
+          x,
+          lineY
+        );
+
+        line =
+          word;
+
+        lineY +=
+          lineHeight;
+      } else {
+        line =
+          testLine;
+      }
+    }
+
+    if (line) {
+      context.fillText(
+        line,
+        x,
+        lineY
+      );
+    }
+
+    context.restore();
+  }
+
+  function renderCanvasFrame({
+    image,
+    questionText,
+    answerText
+  }) {
+    const canvas =
+      canvasRef.current;
+
+    const context =
+      getCanvasContext();
+
+    if (
+      !canvas ||
+      !context ||
+      !image
+    ) {
+      return;
+    }
+
+    context.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    context.drawImage(
+      image,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    drawText(
+      context,
+      questionText,
+      TEMPLATE_CONFIG.question
+    );
+
+    drawText(
+      context,
+      answerText,
+      TEMPLATE_CONFIG.answer
+    );
+  }
+
+  function stopAnimation() {
+    cancelAnimationFrame(
+      animationFrameRef.current
+    );
+
+    animationFrameRef.current =
+      null;
+  }
+
+  function animateAudio({
+    audio,
+    image,
+    questionText,
+    answerText
+  }) {
+    stopAnimation();
+
+    const frame =
+      () => {
+        if (
+          !audio ||
+          audio.ended
+        ) {
+          return;
+        }
+
+        const duration =
+          audio.duration;
+
+        const progress =
+          Number.isFinite(duration) &&
+            duration > 0
+            ? Math.min(
+              1,
+              audio.currentTime /
+              duration
+            )
+            : 0;
+
+        setSegmentProgress(
+          progress
+        );
+
+        renderCanvasFrame({
+          image,
+
+          questionText:
+            questionText(
+              progress
+            ),
+
+          answerText:
+            answerText(
+              progress
+            )
+        });
+
+        if (
+          !audio.paused &&
+          !audio.ended
+        ) {
+          animationFrameRef.current =
+            requestAnimationFrame(
+              frame
+            );
+        }
+      };
+
+    animationFrameRef.current =
+      requestAnimationFrame(
+        frame
+      );
+  }
+
+  function handleTemplateChange(
+    event
+  ) {
+    const file =
+      event.target.files?.[0];
 
     setError("");
+
     setAudioResult(null);
-    setPreviewState("idle");
+
+    setPreviewState(
+      "idle"
+    );
+
+    setSegmentProgress(
+      0
+    );
+
+    setDownloadFormat("");
 
     if (!file) {
       setTemplateFile(null);
       return;
     }
 
-    if (!file.type.startsWith("image/")) {
+    if (
+      !file.type.startsWith(
+        "image/"
+      )
+    ) {
       setTemplateFile(null);
-      setError("Please select an image template.");
+
+      setError(
+        "Please select an image template."
+      );
+
       return;
     }
 
-    if (file.size > MAX_IMAGE_SIZE) {
+    if (
+      file.size >
+      MAX_IMAGE_SIZE
+    ) {
       setTemplateFile(null);
-      setError("Template image must be 10 MB or smaller.");
+
+      setError(
+        "Template image must be 10 MB or smaller."
+      );
+
       return;
     }
 
-    setTemplateFile(file);
+    setTemplateFile(
+      file
+    );
   }
 
-  function updateTypewriter(audio) {
-    if (
-      !audio ||
-      !Number.isFinite(audio.duration) ||
-      audio.duration <= 0
-    ) {
+  async function handlePreview() {
+    if (isRecording) {
       return;
     }
 
-    const progress = Math.min(
-      1,
-      Math.max(0, audio.currentTime / audio.duration)
+    const questionAudio =
+      questionAudioRef.current;
+
+    const answerAudio =
+      answerAudioRef.current;
+
+    if (
+      !questionAudio ||
+      !answerAudio
+    ) {
+      setError(
+        "Generate the audio first."
+      );
+
+      return;
+    }
+
+    clearTimeout(
+      gapTimerRef.current
     );
 
-    setSegmentProgress(progress);
+    stopAnimation();
 
-    if (!audio.paused && !audio.ended) {
-      animationFrameRef.current = requestAnimationFrame(() => {
-        updateTypewriter(audio);
+    questionAudio.pause();
+    answerAudio.pause();
+
+    questionAudio.currentTime =
+      0;
+
+    answerAudio.currentTime =
+      0;
+
+    try {
+      const image =
+        await loadTemplateImage();
+
+      renderCanvasFrame({
+        image,
+
+        questionText:
+          "",
+
+        answerText:
+          ""
       });
+
+      setPreviewState(
+        "question"
+      );
+
+      setSegmentProgress(
+        0
+      );
+
+      await questionAudio.play();
+
+      animateAudio({
+        audio:
+          questionAudio,
+
+        image,
+
+        questionText:
+          (progress) =>
+            getVisibleText(
+              `Q. ${question.trim()}`,
+              progress
+            ),
+
+        answerText:
+          () => ""
+      });
+    } catch (previewError) {
+      setPreviewState(
+        "idle"
+      );
+
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Unable to start preview."
+      );
     }
   }
 
-  function handleQuestionEnded() {
-    cancelAnimationFrame(animationFrameRef.current);
+  async function handleQuestionEnded() {
+    if (isRecording) {
+      return;
+    }
 
-    const answerAudio = answerAudioRef.current;
+    stopAnimation();
+
+    clearTimeout(
+      gapTimerRef.current
+    );
+
+    const answerAudio =
+      answerAudioRef.current;
 
     if (!answerAudio) {
       return;
     }
 
-    // Keep the complete question visible.
-    setSegmentProgress(1);
-    setPreviewState("gap");
-
-    clearTimeout(gapTimerRef.current);
-
-    gapTimerRef.current = setTimeout(async () => {
-      setPreviewState("answer");
-      setSegmentProgress(0);
-
-      answerAudio.currentTime = 0;
-
-      try {
-        await answerAudio.play();
-
-        cancelAnimationFrame(animationFrameRef.current);
-
-        animationFrameRef.current =
-          requestAnimationFrame(() => {
-            updateTypewriter(answerAudio);
-          });
-      } catch {
-        setPreviewState("idle");
-      }
-    }, TEMPLATE_CONFIG.gapSeconds * 1000);
-  }
-  
-  function handleAnswerEnded() {
-    cancelAnimationFrame(animationFrameRef.current);
-
-    setSegmentProgress(1);
-    setPreviewState("complete");
-  }
-
-  async function handlePreview() {
-    const questionAudio = questionAudioRef.current;
-    const answerAudio = answerAudioRef.current;
-
-    if (!questionAudio || !answerAudio) {
-      return;
-    }
-
-    clearTimeout(gapTimerRef.current);
-    cancelAnimationFrame(animationFrameRef.current);
-
-    answerAudio.pause();
-    answerAudio.currentTime = 0;
-
-    questionAudio.pause();
-    questionAudio.currentTime = 0;
-
-    setSegmentProgress(0);
-    setPreviewState("question");
-
     try {
-      await questionAudio.play();
+      const image =
+        await loadTemplateImage();
 
-      cancelAnimationFrame(animationFrameRef.current);
+      setPreviewState(
+        "gap"
+      );
 
-      animationFrameRef.current = requestAnimationFrame(() => {
-        updateTypewriter(questionAudio);
+      setSegmentProgress(
+        1
+      );
+
+      renderCanvasFrame({
+        image,
+
+        questionText:
+          `Q. ${question.trim()}`,
+
+        answerText:
+          ""
       });
-    } catch {
-      setPreviewState("idle");
+
+      gapTimerRef.current =
+        setTimeout(
+          async () => {
+            try {
+              answerAudio.currentTime =
+                0;
+
+              setPreviewState(
+                "answer"
+              );
+
+              setSegmentProgress(
+                0
+              );
+
+              renderCanvasFrame({
+                image,
+
+                questionText:
+                  `Q. ${question.trim()}`,
+
+                answerText:
+                  ""
+              });
+
+              await answerAudio.play();
+
+              animateAudio({
+                audio:
+                  answerAudio,
+
+                image,
+
+                questionText:
+                  () =>
+                    `Q. ${question.trim()}`,
+
+                answerText:
+                  (progress) =>
+                    getVisibleText(
+                      answer.trim(),
+                      progress
+                    )
+              });
+            } catch (error) {
+              setPreviewState(
+                "idle"
+              );
+
+              setError(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to start answer audio."
+              );
+            }
+          },
+
+          TEMPLATE_CONFIG.gapSeconds *
+          1000
+        );
+    } catch (error) {
+      setPreviewState(
+        "idle"
+      );
+
       setError(
-        "The browser blocked audio playback. Click Preview again to allow playback."
+        error instanceof Error
+          ? error.message
+          : "Unable to continue preview."
       );
     }
   }
 
-  function handleStopPreview() {
-    clearTimeout(gapTimerRef.current);
-    cancelAnimationFrame(animationFrameRef.current);
+  async function handleAnswerEnded() {
+    if (isRecording) {
+      return;
+    }
 
-    questionAudioRef.current?.pause();
-    answerAudioRef.current?.pause();
+    stopAnimation();
 
-    setPreviewState("idle");
-    setSegmentProgress(0);
+    setPreviewState(
+      "complete"
+    );
+
+    setSegmentProgress(
+      1
+    );
+
+    const image =
+      await loadTemplateImage();
+
+    renderCanvasFrame({
+      image,
+
+      questionText:
+        `Q. ${question.trim()}`,
+
+      answerText:
+        answer.trim()
+    });
   }
 
-  async function handleGenerate(event) {
+  function handleStopPreview() {
+    if (isRecording) {
+      return;
+    }
+
+    clearTimeout(
+      gapTimerRef.current
+    );
+
+    stopAnimation();
+
+    questionAudioRef.current?.pause();
+
+    answerAudioRef.current?.pause();
+
+    setPreviewState(
+      "idle"
+    );
+
+    setSegmentProgress(
+      0
+    );
+
+    if (imageRef.current) {
+      renderCanvasFrame({
+        image:
+          imageRef.current,
+
+        questionText:
+          "",
+
+        answerText:
+          ""
+      });
+    }
+  }
+
+  async function handleGenerate(
+    event
+  ) {
     event.preventDefault();
 
     setError("");
+
     setAudioResult(null);
-    setPreviewState("idle");
+
+    setPreviewState(
+      "idle"
+    );
+
+    setSegmentProgress(
+      0
+    );
+
+    setDownloadFormat(
+      ""
+    );
 
     if (!templateFile) {
-      setError("Upload a template image first.");
+      setError(
+        "Upload a template image first."
+      );
+
       return;
     }
 
     if (!question.trim()) {
-      setError("Enter a Question.");
+      setError(
+        "Enter a Question."
+      );
+
       return;
     }
 
     if (!answer.trim()) {
-      setError("Enter an Answer.");
+      setError(
+        "Enter an Answer."
+      );
+
       return;
     }
 
-    const formData = new FormData();
+    const formData =
+      new FormData();
 
-    formData.append("template", templateFile);
-    formData.append("question", question.trim());
-    formData.append("answer", answer.trim());
+    formData.append(
+      "template",
+      templateFile
+    );
 
-    setIsGenerating(true);
+    formData.append(
+      "question",
+      question.trim()
+    );
+
+    formData.append(
+      "answer",
+      answer.trim()
+    );
+
+    setIsGenerating(
+      true
+    );
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/generate`,
-        {
-          method: "POST",
-          body: formData
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE_URL}/api/generate`,
+          {
+            method:
+              "POST",
 
-      const data = await response.json();
+            body:
+              formData
+          }
+        );
+
+      const data =
+        await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Audio generation failed."
+          data.error ||
+          "Audio generation failed."
         );
       }
 
       setDurations({
-        question: 0,
-        answer: 0
+        question:
+          0,
+
+        answer:
+          0
       });
 
       setAudioResult({
-        questionAudioUrl: `${API_BASE_URL}${data.questionAudioUrl}`,
-        answerAudioUrl: `${API_BASE_URL}${data.answerAudioUrl}`,
-        questionVoice: data.questionVoice,
-        answerVoice: data.answerVoice,
-        questionAudioBytes: data.questionAudioBytes,
-        answerAudioBytes: data.answerAudioBytes
+        runId:
+          data.runId,
+
+        questionAudioUrl:
+          `${API_BASE_URL}${data.questionAudioUrl}`,
+
+        answerAudioUrl:
+          `${API_BASE_URL}${data.answerAudioUrl}`,
+
+        questionVoice:
+          data.questionVoice,
+
+        answerVoice:
+          data.answerVoice,
+
+        questionAudioBytes:
+          data.questionAudioBytes,
+
+        answerAudioBytes:
+          data.answerAudioBytes
       });
     } catch (generationError) {
       setError(
@@ -281,51 +949,670 @@ function App() {
           : "Audio generation failed."
       );
     } finally {
-      setIsGenerating(false);
+      setIsGenerating(
+        false
+      );
     }
   }
 
-  const formattedQuestion = `Q. ${question.trim()}`;
+  async function handleDownloadVideo() {
+    if (isRecording) {
+      return;
+    }
 
-  const questionVisibleText =
-    previewState === "question"
-      ? getVisibleText(
-        formattedQuestion,
-        segmentProgress
-      )
-      : previewState === "gap" ||
-        previewState === "answer" ||
-        previewState === "complete"
-        ? formattedQuestion
-        : "";
+    if (!audioResult) {
+      setError(
+        "Generate the audio first."
+      );
 
-  const answerVisibleText =
-    previewState === "answer"
-      ? getVisibleText(
-        answer.trim(),
-        segmentProgress
-      )
-      : previewState === "complete"
-        ? answer.trim()
-        : "";
+      return;
+    }
+
+    if (
+      !window.MediaRecorder ||
+      !HTMLCanvasElement.prototype.captureStream
+    ) {
+      setError(
+        "Your browser does not support direct video recording. Use the latest Chrome or Edge."
+      );
+
+      return;
+    }
+
+    const canvas =
+      canvasRef.current;
+
+    if (!canvas) {
+      setError(
+        "Canvas is not available."
+      );
+
+      return;
+    }
+
+    setError("");
+
+    setIsRecording(
+      true
+    );
+
+    setDownloadFormat(
+      ""
+    );
+
+    clearTimeout(
+      gapTimerRef.current
+    );
+
+    stopAnimation();
+
+    try {
+      const image =
+        await loadTemplateImage();
+
+      /*
+       * Use separate temporary audio elements
+       * for recording.
+       *
+       * This is important because the visible
+       * preview audio elements should not be
+       * reused as MediaElementSource nodes.
+       */
+
+      const recordingQuestionAudio =
+        new Audio();
+
+      const recordingAnswerAudio =
+        new Audio();
+
+      recordingQuestionAudio.crossOrigin =
+        "anonymous";
+
+      recordingAnswerAudio.crossOrigin =
+        "anonymous";
+
+      recordingQuestionAudio.src =
+        audioResult.questionAudioUrl;
+
+      recordingAnswerAudio.src =
+        audioResult.answerAudioUrl;
+
+      recordingQuestionAudio.preload =
+        "auto";
+
+      recordingAnswerAudio.preload =
+        "auto";
+
+      await Promise.all([
+        waitForAudioReady(
+          recordingQuestionAudio
+        ),
+
+        waitForAudioReady(
+          recordingAnswerAudio
+        )
+      ]);
+
+      const audioContext =
+        new AudioContext();
+
+      await audioContext.resume();
+
+      const destination =
+        audioContext.createMediaStreamDestination();
+
+      const questionSource =
+        audioContext.createMediaElementSource(
+          recordingQuestionAudio
+        );
+
+      const answerSource =
+        audioContext.createMediaElementSource(
+          recordingAnswerAudio
+        );
+
+      questionSource.connect(
+        destination
+      );
+
+      answerSource.connect(
+        destination
+      );
+
+      /*
+       * The canvas shown to the user is the
+       * exact same canvas that gets recorded.
+       */
+
+      const canvasStream =
+        canvas.captureStream(
+          30
+        );
+
+      const combinedStream =
+        new MediaStream();
+
+      canvasStream
+        .getVideoTracks()
+        .forEach(
+          (track) => {
+            combinedStream.addTrack(
+              track
+            );
+          }
+        );
+
+      destination.stream
+        .getAudioTracks()
+        .forEach(
+          (track) => {
+            combinedStream.addTrack(
+              track
+            );
+          }
+        );
+
+      const mimeTypes = [
+        "video/mp4;codecs=h264,aac",
+        "video/mp4",
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm"
+      ];
+
+      const mimeType =
+        mimeTypes.find(
+          (type) =>
+            MediaRecorder.isTypeSupported(
+              type
+            )
+        );
+
+      if (!mimeType) {
+        throw new Error(
+          "This browser does not support a compatible video recording format."
+        );
+      }
+
+      const extension =
+        mimeType.startsWith(
+          "video/mp4"
+        )
+          ? "mp4"
+          : "webm";
+
+      setDownloadFormat(
+        extension.toUpperCase()
+      );
+
+      const recorder =
+        new MediaRecorder(
+          combinedStream,
+          {
+            mimeType,
+
+            videoBitsPerSecond:
+              6_000_000
+          }
+        );
+
+      recorderRef.current =
+        recorder;
+
+      const recordedChunks =
+        [];
+
+      recordingResourcesRef.current =
+      {
+        questionAudio:
+          recordingQuestionAudio,
+
+        answerAudio:
+          recordingAnswerAudio,
+
+        audioContext,
+
+        destination,
+
+        canvasStream,
+
+        stream:
+          combinedStream
+      };
+
+      recorder.ondataavailable =
+        (event) => {
+          if (
+            event.data.size >
+            0
+          ) {
+            recordedChunks.push(
+              event.data
+            );
+          }
+        };
+
+      recorder.onerror =
+        () => {
+          setIsRecording(
+            false
+          );
+
+          setError(
+            "Video recording failed."
+          );
+        };
+
+      recorder.onstop =
+        () => {
+          const blob =
+            new Blob(
+              recordedChunks,
+              {
+                type:
+                  mimeType
+              }
+            );
+
+          if (!blob.size) {
+            setError(
+              "The recorded video is empty."
+            );
+          } else {
+            /*
+             * Direct download.
+             *
+             * No second video preview.
+             * No server-side rendering.
+             */
+
+            const url =
+              URL.createObjectURL(
+                blob
+              );
+
+            const anchor =
+              document.createElement(
+                "a"
+              );
+
+            anchor.href =
+              url;
+
+            anchor.download =
+              `qa-video-${Date.now()}.${extension}`;
+
+            document.body.appendChild(
+              anchor
+            );
+
+            anchor.click();
+
+            anchor.remove();
+
+            setTimeout(
+              () =>
+                URL.revokeObjectURL(
+                  url
+                ),
+              1000
+            );
+          }
+
+          combinedStream
+            .getTracks()
+            .forEach(
+              (track) =>
+                track.stop()
+            );
+
+          canvasStream
+            .getTracks()
+            .forEach(
+              (track) =>
+                track.stop()
+            );
+
+          audioContext
+            .close()
+            .catch(
+              () => { }
+            );
+
+          recordingQuestionAudio.pause();
+          recordingAnswerAudio.pause();
+
+          recordingQuestionAudio.src =
+            "";
+
+          recordingAnswerAudio.src =
+            "";
+
+          recordingResourcesRef.current =
+            null;
+
+          recorderRef.current =
+            null;
+
+          setIsRecording(
+            false
+          );
+        };
+
+      /*
+       * Start with a completely empty frame.
+       */
+
+      renderCanvasFrame({
+        image,
+        questionText: "",
+        answerText: ""
+      });
+
+      setPreviewState("question");
+      setSegmentProgress(0);
+
+      await new Promise((resolve) =>
+        requestAnimationFrame(resolve)
+      );
+
+      recorder.start(100);
+
+      await recordingQuestionAudio.play();
+
+      /*
+       * QUESTION RECORDING
+       */
+
+      const recordQuestion =
+        () => {
+          if (
+            recordingQuestionAudio.paused ||
+            recordingQuestionAudio.ended
+          ) {
+            return;
+          }
+
+          const progress =
+            recordingQuestionAudio.duration >
+              0
+              ? Math.min(
+                1,
+
+                recordingQuestionAudio.currentTime /
+                recordingQuestionAudio.duration
+              )
+              : 0;
+
+          setSegmentProgress(
+            progress
+          );
+
+          renderCanvasFrame({
+            image,
+
+            questionText:
+              getVisibleText(
+                `Q. ${question.trim()}`,
+                progress
+              ),
+
+            answerText:
+              ""
+          });
+
+          animationFrameRef.current =
+            requestAnimationFrame(
+              recordQuestion
+            );
+        };
+
+      animationFrameRef.current =
+        requestAnimationFrame(
+          recordQuestion
+        );
+
+      /*
+       * QUESTION END
+       */
+
+      recordingQuestionAudio.onended =
+        () => {
+          stopAnimation();
+
+          setPreviewState(
+            "gap"
+          );
+
+          setSegmentProgress(
+            1
+          );
+
+          renderCanvasFrame({
+            image,
+
+            questionText:
+              `Q. ${question.trim()}`,
+
+            answerText:
+              ""
+          });
+
+          gapTimerRef.current =
+            setTimeout(
+              async () => {
+                try {
+                  recordingAnswerAudio.currentTime =
+                    0;
+
+                  setPreviewState(
+                    "answer"
+                  );
+
+                  setSegmentProgress(
+                    0
+                  );
+
+                  renderCanvasFrame({
+                    image,
+
+                    questionText:
+                      `Q. ${question.trim()}`,
+
+                    answerText:
+                      ""
+                  });
+
+                  await recordingAnswerAudio.play();
+
+                  /*
+                   * ANSWER RECORDING
+                   */
+
+                  const recordAnswer =
+                    () => {
+                      if (
+                        recordingAnswerAudio.paused ||
+                        recordingAnswerAudio.ended
+                      ) {
+                        return;
+                      }
+
+                      const progress =
+                        recordingAnswerAudio.duration >
+                          0
+                          ? Math.min(
+                            1,
+
+                            recordingAnswerAudio.currentTime /
+                            recordingAnswerAudio.duration
+                          )
+                          : 0;
+
+                      setSegmentProgress(
+                        progress
+                      );
+
+                      renderCanvasFrame({
+                        image,
+
+                        questionText:
+                          `Q. ${question.trim()}`,
+
+                        answerText:
+                          getVisibleText(
+                            answer.trim(),
+                            progress
+                          )
+                      });
+
+                      animationFrameRef.current =
+                        requestAnimationFrame(
+                          recordAnswer
+                        );
+                    };
+
+                  animationFrameRef.current =
+                    requestAnimationFrame(
+                      recordAnswer
+                    );
+                } catch (error) {
+                  setError(
+                    error instanceof Error
+                      ? error.message
+                      : "Unable to start answer audio."
+                  );
+
+                  if (
+                    recorder.state !==
+                    "inactive"
+                  ) {
+                    recorder.stop();
+                  }
+                }
+              },
+
+              TEMPLATE_CONFIG.gapSeconds *
+              1000
+            );
+        };
+
+      /*
+       * ANSWER END
+       */
+
+      recordingAnswerAudio.onended =
+        () => {
+          stopAnimation();
+
+          setPreviewState(
+            "complete"
+          );
+
+          setSegmentProgress(
+            1
+          );
+
+          renderCanvasFrame({
+            image,
+
+            questionText:
+              `Q. ${question.trim()}`,
+
+            answerText:
+              answer.trim()
+          });
+
+          /*
+           * Give MediaRecorder a moment
+           * to capture the final frame.
+           */
+
+          setTimeout(
+            () => {
+              if (
+                recorder.state !==
+                "inactive"
+              ) {
+                recorder.stop();
+              }
+            },
+            150
+          );
+        };
+    } catch (recordingError) {
+      stopAnimation();
+
+      clearTimeout(
+        gapTimerRef.current
+      );
+
+      const resources =
+        recordingResourcesRef.current;
+
+      if (resources) {
+        resources.questionAudio.pause();
+        resources.answerAudio.pause();
+
+        resources.audioContext
+          .close()
+          .catch(() => { });
+
+        resources.stream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        resources.canvasStream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        recordingResourcesRef.current =
+          null;
+      }
+
+      recorderRef.current =
+        null;
+
+      setIsRecording(
+        false
+      );
+
+      setError(
+        recordingError instanceof Error
+          ? recordingError.message
+          : "Video recording failed."
+      );
+    }
+  }
 
   return (
     <main className="app-shell">
       <section className="app-card">
         <header className="header">
-          <p className="eyebrow">devwithvk</p>
+          <p className="eyebrow">
+            devwithvk
+          </p>
 
-          <h1>Q&A Video Generator</h1>
+          <h1>
+            Q&A Video Generator
+          </h1>
 
           <p className="subtitle">
-            Upload a template, enter your Question and Answer,
-            then generate a short-form video with separate voices
-            and typewriter animation.
+            Upload a template, enter your
+            Question and Answer, then generate
+            a short-form video with separate
+            voices and typewriter animation.
           </p>
         </header>
 
         <form
-          onSubmit={handleGenerate}
+          onSubmit={
+            handleGenerate
+          }
           className="generator-form"
         >
           <div className="field-group">
@@ -334,23 +1621,31 @@ function App() {
                 Template image
               </label>
 
-              <span>PNG, JPG or WebP</span>
+              <span>
+                PNG, JPG or WebP
+              </span>
             </div>
 
             <label
-              className={`upload-box ${previewUrl ? "has-preview" : ""
+              className={`upload-box ${previewUrl
+                ? "has-preview"
+                : ""
                 }`}
             >
               <input
                 id="template"
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
-                onChange={handleTemplateChange}
+                onChange={
+                  handleTemplateChange
+                }
               />
 
               {previewUrl ? (
                 <img
-                  src={previewUrl}
+                  src={
+                    previewUrl
+                  }
                   alt="Selected template preview"
                 />
               ) : (
@@ -360,7 +1655,8 @@ function App() {
                   </strong>
 
                   <small>
-                    Your template controls the visual design.
+                    Your template controls
+                    the visual design.
                   </small>
                 </span>
               )}
@@ -373,14 +1669,18 @@ function App() {
                 Question
               </label>
 
-              <span>Male voice</span>
+              <span>
+                Male voice
+              </span>
             </div>
 
             <textarea
               id="question"
               value={question}
               onChange={(event) =>
-                setQuestion(event.target.value)
+                setQuestion(
+                  event.target.value
+                )
               }
               placeholder="What is ALTER?"
               rows={4}
@@ -393,14 +1693,18 @@ function App() {
                 Answer
               </label>
 
-              <span>Female voice</span>
+              <span>
+                Female voice
+              </span>
             </div>
 
             <textarea
               id="answer"
               value={answer}
               onChange={(event) =>
-                setAnswer(event.target.value)
+                setAnswer(
+                  event.target.value
+                )
               }
               placeholder="ALTER is a DDL command used to modify the structure of an existing table."
               rows={7}
@@ -416,7 +1720,9 @@ function App() {
           <button
             className="generate-button"
             type="submit"
-            disabled={!canGenerate}
+            disabled={
+              !canGenerate
+            }
           >
             {isGenerating
               ? "Generating Audio..."
@@ -429,20 +1735,19 @@ function App() {
             className="audio-result"
             aria-live="polite"
           >
-            <h2>Audio generated</h2>
+            <h2>
+              Audio generated
+            </h2>
 
             <audio
               ref={questionAudioRef}
               src={audioResult.questionAudioUrl}
+              crossOrigin="anonymous"
               preload="metadata"
               onLoadedMetadata={(event) => {
-                const duration =
-                  event.currentTarget?.duration;
+                const duration = event.currentTarget?.duration;
 
-                if (
-                  Number.isFinite(duration) &&
-                  duration > 0
-                ) {
+                if (Number.isFinite(duration) && duration > 0) {
                   setDurations((current) => ({
                     ...current,
                     question: duration
@@ -455,15 +1760,12 @@ function App() {
             <audio
               ref={answerAudioRef}
               src={audioResult.answerAudioUrl}
+              crossOrigin="anonymous"
               preload="metadata"
               onLoadedMetadata={(event) => {
-                const duration =
-                  event.currentTarget?.duration;
+                const duration = event.currentTarget?.duration;
 
-                if (
-                  Number.isFinite(duration) &&
-                  duration > 0
-                ) {
+                if (Number.isFinite(duration) && duration > 0) {
                   setDurations((current) => ({
                     ...current,
                     answer: duration
@@ -473,100 +1775,121 @@ function App() {
               onEnded={handleAnswerEnded}
             />
 
+            {/*
+              IMPORTANT:
+              This canvas is BOTH:
+              1. the visible preview
+              2. the source used by MediaRecorder
+
+              Therefore the downloaded video
+              uses exactly the same animation
+              as the preview.
+            */}
+
+            <canvas
+              ref={
+                canvasRef
+              }
+              width={
+                TEMPLATE_CONFIG.canvas.width
+              }
+              height={
+                TEMPLATE_CONFIG.canvas.height
+              }
+              style={{
+                display:
+                  "block",
+
+                width:
+                  "100%",
+
+                height:
+                  "auto",
+
+                borderRadius:
+                  "12px"
+              }}
+            />
+
             <div className="preview-controls">
               <button
                 type="button"
-                onClick={handlePreview}
+                onClick={
+                  handlePreview
+                }
+                disabled={
+                  isRecording
+                }
               >
                 Preview Animation
               </button>
 
               <button
                 type="button"
-                onClick={handleStopPreview}
+                onClick={
+                  handleStopPreview
+                }
                 className="secondary-button"
+                disabled={
+                  isRecording
+                }
               >
                 Stop
               </button>
+
+              <button
+                type="button"
+                onClick={
+                  handleDownloadVideo
+                }
+                disabled={
+                  isRecording
+                }
+              >
+                {isRecording
+                  ? "Recording Video..."
+                  : "Download Video"}
+              </button>
             </div>
 
-            <div
-              className="video-preview"
-              style={{
-                aspectRatio: `${TEMPLATE_CONFIG.canvas.width} / ${TEMPLATE_CONFIG.canvas.height}`
-              }}
-            >
-              <img
-                src={previewUrl}
-                alt="Template animation preview"
-              />
-
-              <div
-                className="template-text question-text"
-                style={{
-                  left: `${(TEMPLATE_CONFIG.question.x /
-                    TEMPLATE_CONFIG.canvas.width) *
-                    100
-                    }%`,
-                  top: `${(TEMPLATE_CONFIG.question.y /
-                    TEMPLATE_CONFIG.canvas.height) *
-                    100
-                    }%`,
-                  width: `${(TEMPLATE_CONFIG.question.width /
-                    TEMPLATE_CONFIG.canvas.width) *
-                    100
-                    }%`
-                }}
-              >
-                {questionVisibleText}
-              </div>
-
-              <div
-                className="template-text answer-text"
-                style={{
-                  left: `${(TEMPLATE_CONFIG.answer.x /
-                    TEMPLATE_CONFIG.canvas.width) *
-                    100
-                    }%`,
-                  top: `${(TEMPLATE_CONFIG.answer.y /
-                    TEMPLATE_CONFIG.canvas.height) *
-                    100
-                    }%`,
-                  width: `${(TEMPLATE_CONFIG.answer.width /
-                    TEMPLATE_CONFIG.canvas.width) *
-                    100
-                    }%`
-                }}
-              >
-                {answerVisibleText}
-              </div>
-            </div>
+            {downloadFormat &&
+              !isRecording && (
+                <p className="success-message">
+                  Video downloaded as{" "}
+                  {downloadFormat}.
+                  The downloaded video uses
+                  the same canvas animation as
+                  the preview.
+                </p>
+              )}
 
             <div className="timing-summary">
               <span>
                 Question:{" "}
                 {durations.question
-                  ? `${durations.question.toFixed(2)}s`
+                  ? `${durations.question.toFixed(
+                    2
+                  )}s`
                   : "loading..."}
               </span>
 
               <span>
                 Gap:{" "}
-                {TEMPLATE_CONFIG.gapSeconds.toFixed(2)}s
+                {TEMPLATE_CONFIG.gapSeconds.toFixed(
+                  2
+                )}
+                s
               </span>
 
               <span>
                 Answer:{" "}
                 {durations.answer
-                  ? `${durations.answer.toFixed(2)}s`
+                  ? `${durations.answer.toFixed(
+                    2
+                  )}s`
                   : "loading..."}
               </span>
             </div>
-
-            <p className="success-message">
-              Audio and typewriter timing are ready.
-              Final MP4 rendering is the next step.
-            </p>
           </section>
         )}
       </section>
