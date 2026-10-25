@@ -18,13 +18,21 @@ const upload = multer({
 
 const tempRoot = path.resolve(process.cwd(), "temp");
 
-const allowedOrigin = "http://127.0.0.1:5173";
+const allowedOrigins = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 app.use((req, res, next) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    allowedOrigin
-  );
+  const origin = req.headers.origin;
+
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader(
+      "Access-Control-Allow-Origin",
+      origin
+    );
+  }
 
   res.setHeader(
     "Access-Control-Allow-Methods",
@@ -34,11 +42,6 @@ app.use((req, res, next) => {
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type"
-  );
-
-  res.setHeader(
-    "Access-Control-Allow-Credentials",
-    "false"
   );
 
   if (req.method === "OPTIONS") {
@@ -204,7 +207,7 @@ app.post(
           recursive: true,
           force: true
         }
-      ).catch(() => {});
+      ).catch(() => { });
 
       console.error(
         "Audio generation failed:",
@@ -221,12 +224,10 @@ app.post(
   }
 );
 
-app.listen(
-  port,
-  "127.0.0.1",
-  () => {
-    console.log(
-      `Q&A video server running at http://127.0.0.1:${port}`
-    );
-  }
-);
+const host = process.env.HOST || "0.0.0.0";
+
+app.listen(port, host, () => {
+  console.log(
+    `Q&A video server running on ${host}:${port}`
+  );
+});

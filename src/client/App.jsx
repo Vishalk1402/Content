@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-const API_BASE_URL = "http://127.0.0.1:3001";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:3001";
 
 const TEMPLATE_CONFIG = {
   canvas: {
