@@ -224,6 +224,56 @@ app.post(
   }
 );
 
+app.post("/api/cleanup", async (req, res) => {
+  const runId = req.body.runId?.trim();
+
+  if (!runId) {
+    return res.status(400).json({
+      error: "A generated run is required."
+    });
+  }
+
+  if (
+    !/^[a-f0-9-]{36}$/i.test(runId)
+  ) {
+    return res.status(400).json({
+      error: "Invalid run ID."
+    });
+  }
+
+  const runDirectory = path.join(
+    tempRoot,
+    runId
+  );
+
+  try {
+    await fs.rm(
+      runDirectory,
+      {
+        recursive: true,
+        force: true
+      }
+    );
+
+    return res.json({
+      status: "cleaned",
+      runId
+    });
+  } catch (error) {
+    console.error(
+      "Cleanup failed:",
+      error
+    );
+
+    return res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to clean generated files."
+    });
+  }
+});
+
 const host = process.env.HOST || "0.0.0.0";
 
 app.listen(port, host, () => {

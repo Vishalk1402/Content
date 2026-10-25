@@ -1204,7 +1204,7 @@ function App() {
         };
 
       recorder.onstop =
-        () => {
+        async () => {
           const blob =
             new Blob(
               recordedChunks,
@@ -1256,6 +1256,13 @@ function App() {
                   url
                 ),
               1000
+            );
+
+            // The final video Blob is already created locally,
+            // so the generated server-side audio files are no
+            // longer needed.
+            await cleanupGeneratedRun(
+              audioResult.runId
             );
           }
 
@@ -1585,6 +1592,32 @@ function App() {
         recordingError instanceof Error
           ? recordingError.message
           : "Video recording failed."
+      );
+    }
+  }
+
+  async function cleanupGeneratedRun(runId) {
+    if (!runId) {
+      return;
+    }
+
+    try {
+      await fetch(
+        `${API_BASE_URL}/api/cleanup`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            runId
+          })
+        }
+      );
+    } catch (cleanupError) {
+      console.warn(
+        "Generated files cleanup failed:",
+        cleanupError
       );
     }
   }
