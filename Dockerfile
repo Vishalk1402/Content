@@ -22,6 +22,7 @@ COPY . .
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
+ENV PYTHON_BIN=python3
 
 EXPOSE 10000
 

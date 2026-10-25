@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-const pythonBin = process.env.PYTHON_BIN || "python";
+const pythonBin = process.env.PYTHON_BIN || "python3";
 const questionVoice = process.env.QUESTION_VOICE;
 const answerVoice = process.env.ANSWER_VOICE;
 const ttsRate = process.env.TTS_RATE || "-10%";
