@@ -1594,11 +1594,11 @@ function App() {
       <section className="app-card">
         <header className="header">
           <p className="eyebrow">
-            devwithvk
+            Automated by VISHAL KOLI
           </p>
 
           <h1>
-            Q&A Video Generator
+            Video Generator
           </h1>
 
           <p className="subtitle">
@@ -1725,8 +1725,8 @@ function App() {
             }
           >
             {isGenerating
-              ? "Generating Audio..."
-              : "Generate Audio"}
+              ? "Generating Video..."
+              : "Generate Video"}
           </button>
         </form>
 
