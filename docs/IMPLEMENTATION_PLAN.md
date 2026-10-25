@@ -8,7 +8,7 @@ The timebox is one day. If time is running out, prioritize a correct final MP4 o
 
 ## Progress
 
-**Current status:** Step 2 is complete. Step 3 is implemented and ready for manual validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering.
+**Current status:** Step 2 is complete. Step 3 is implemented and ready for manual validation. Step 0 remains partially validated because the exact final template text layout still needs confirmation during rendering. Deployment planning has been added as the next phase after the current local implementation is stable.
 
 **Overall:** 2/5 implementation steps complete.
 
@@ -108,6 +108,50 @@ The renderer will use a reusable `TemplateConfig` rather than hardcoding one ima
 - [ ] Update this document's status and record the final command used to run the app.
 
 **Status:** ⬜ Not started
+
+## Deployment Stories
+
+The local MVP is now being prepared for free-tier hosting. Deployment should preserve the existing working generation, preview, rendering, download, saved-template, and automatic cleanup behavior. No persistent user-content storage should be introduced.
+
+### DEP-001 — Production Configuration
+
+- [ ] Replace hardcoded local frontend/backend URLs with environment-based configuration.
+- [ ] Add production-compatible CORS configuration.
+- [ ] Keep local development configuration working unchanged.
+- [ ] Verify generated audio and MP4 URLs work from the deployed frontend.
+
+**Checkpoint:** the application can run locally and has a clean production configuration without localhost assumptions.
+
+### DEP-002 — Free-Tier Deployment
+
+- [ ] Deploy the React/Vite frontend to a free-tier static hosting service.
+- [ ] Deploy the Node.js/Express + FFmpeg backend to a free-tier-compatible service.
+- [ ] Configure all required environment variables.
+- [ ] Verify the backend health endpoint after deployment.
+- [ ] Verify the frontend can communicate with the deployed backend.
+
+**Checkpoint:** the deployed application opens successfully and the frontend can reach the backend.
+
+### DEP-003 — Production Validation
+
+- [ ] Test Template → Question/Answer → TTS → Preview → MP4 → Download.
+- [ ] Verify downloaded MP4 contains both video and audio.
+- [ ] Verify typewriter animation follows the same timing model as the current implementation.
+- [ ] Verify saved templates continue to work.
+- [ ] Verify generated temporary audio/video files are cleaned up according to the current application behavior.
+- [ ] Verify no regression in local development.
+
+**Checkpoint:** the deployed application completes the full user flow successfully without introducing persistent user-content storage.
+
+### DEP-004 — Deployment & Maintenance Documentation
+
+- [ ] Document the frontend deployment configuration.
+- [ ] Document the backend deployment configuration.
+- [ ] Document required environment variables.
+- [ ] Document how future GitHub changes are deployed/redeployed.
+- [ ] Document free-tier limitations and relevant operational constraints.
+
+**Checkpoint:** another developer can deploy the current repository and understand how future changes reach production.
 
 ## Timebox guidance
 
