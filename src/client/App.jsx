@@ -1203,109 +1203,86 @@ function App() {
           );
         };
 
-      recorder.onstop =
-        async () => {
-          const blob =
-            new Blob(
-              recordedChunks,
-              {
-                type:
-                  mimeType
-              }
-            );
+      recorder.onstop = async () => {
+        try {
+          const recordedBlob = new Blob(recordedChunks, {
+            type: mimeType
+          });
 
-          if (!blob.size) {
-            setError(
-              "The recorded video is empty."
-            );
-          } else {
-            /*
-             * Direct download.
-             *
-             * No second video preview.
-             * No server-side rendering.
-             */
+          if (!recordedBlob.size) {
+            throw new Error("The recorded video is empty.");
+          }
 
-            const url =
-              URL.createObjectURL(
-                blob
-              );
+          const formData = new FormData();
 
-            const anchor =
-              document.createElement(
-                "a"
-              );
+          formData.append(
+            "video",
+            recordedBlob,
+            `recording.${extension}`
+          );
 
-            anchor.href =
-              url;
+          const response = await fetch(
+            `${API_BASE_URL}/api/convert-video`,
+            {
+              method: "POST",
+              body: formData
+            }
+          );
 
-            anchor.download =
-              `qa-video-${Date.now()}.${extension}`;
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
 
-            document.body.appendChild(
-              anchor
-            );
-
-            anchor.click();
-
-            anchor.remove();
-
-            setTimeout(
-              () =>
-                URL.revokeObjectURL(
-                  url
-                ),
-              1000
-            );
-
-            // The final video Blob is already created locally,
-            // so the generated server-side audio files are no
-            // longer needed.
-            await cleanupGeneratedRun(
-              audioResult.runId
+            throw new Error(
+              data.error || "Could not convert the video to MP4."
             );
           }
 
-          combinedStream
-            .getTracks()
-            .forEach(
-              (track) =>
-                track.stop()
-            );
+          const mp4Blob = await response.blob();
 
-          canvasStream
-            .getTracks()
-            .forEach(
-              (track) =>
-                track.stop()
-            );
+          if (!mp4Blob.size) {
+            throw new Error("The converted MP4 is empty.");
+          }
 
-          audioContext
-            .close()
-            .catch(
-              () => { }
-            );
+          const url = URL.createObjectURL(mp4Blob);
+          const anchor = document.createElement("a");
+
+          anchor.href = url;
+          anchor.download = `qa-video-${Date.now()}.mp4`;
+
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+          setDownloadFormat("MP4");
+
+          // Delete the original generated question/answer audio.
+          await cleanupGeneratedRun(audioResult.runId);
+        } catch (error) {
+          setError(
+            error instanceof Error
+              ? error.message
+              : "Video conversion or download failed."
+          );
+        } finally {
+          combinedStream.getTracks().forEach((track) => track.stop());
+          canvasStream.getTracks().forEach((track) => track.stop());
+
+          audioContext.close().catch(() => { });
 
           recordingQuestionAudio.pause();
           recordingAnswerAudio.pause();
 
-          recordingQuestionAudio.src =
-            "";
+          recordingQuestionAudio.src = "";
+          recordingAnswerAudio.src = "";
 
-          recordingAnswerAudio.src =
-            "";
+          recordingResourcesRef.current = null;
+          recorderRef.current = null;
 
-          recordingResourcesRef.current =
-            null;
-
-          recorderRef.current =
-            null;
-
-          setIsRecording(
-            false
-          );
-        };
-
+          setIsRecording(false);
+        }
+      };
       /*
        * Start with a completely empty frame.
        */

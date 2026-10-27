@@ -4,6 +4,9 @@ import multer from "multer";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { createReadStream } from "node:fs";
+import { spawn } from "node:child_process";
+import ffmpegStatic from "ffmpeg-static";
 import { generateQuestionAndAnswerAudio } from "./tts.js";
 
 const app = express();
@@ -16,7 +19,22 @@ const upload = multer({
   }
 });
 
-const tempRoot = path.resolve(process.cwd(), "temp");
+const videoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024
+  }
+});
+
+const tempRoot = path.resolve(
+  process.cwd(),
+  "temp"
+);
+
+const ffmpegBin =
+  process.env.FFMPEG_BIN ||
+  ffmpegStatic ||
+  "ffmpeg";
 
 const allowedOrigins = [
   "http://127.0.0.1:5173",
@@ -72,9 +90,8 @@ app.get("/api/health", (_req, res) => {
 /*
  * Generate question and answer audio.
  *
- * The template is still accepted here because
- * the current frontend sends it as part of the
- * generation request.
+ * The template is accepted because the current
+ * frontend sends it with the generation request.
  *
  * The template itself is not stored on the server.
  */
@@ -151,14 +168,12 @@ app.post(
        * Generate separate voices.
        */
       const voices =
-        await generateQuestionAndAnswerAudio(
-          {
-            question,
-            answer,
-            questionPath,
-            answerPath
-          }
-        );
+        await generateQuestionAndAnswerAudio({
+          question,
+          answer,
+          questionPath,
+          answerPath
+        });
 
       const [
         questionStats,
@@ -207,7 +222,7 @@ app.post(
           recursive: true,
           force: true
         }
-      ).catch(() => { });
+      ).catch(() => {});
 
       console.error(
         "Audio generation failed:",
@@ -224,60 +239,348 @@ app.post(
   }
 );
 
-app.post("/api/cleanup", async (req, res) => {
-  const runId = req.body.runId?.trim();
+/*
+ * Delete generated question/answer audio.
+ */
+app.post(
+  "/api/cleanup",
+  async (req, res) => {
+    const runId =
+      req.body.runId?.trim();
 
-  if (!runId) {
-    return res.status(400).json({
-      error: "A generated run is required."
-    });
+    if (!runId) {
+      return res.status(400).json({
+        error:
+          "A generated run is required."
+      });
+    }
+
+    if (
+      !/^[a-f0-9-]{36}$/i.test(runId)
+    ) {
+      return res.status(400).json({
+        error: "Invalid run ID."
+      });
+    }
+
+    const runDirectory =
+      path.join(
+        tempRoot,
+        runId
+      );
+
+    try {
+      await fs.rm(
+        runDirectory,
+        {
+          recursive: true,
+          force: true
+        }
+      );
+
+      return res.json({
+        status: "cleaned",
+        runId
+      });
+    } catch (error) {
+      console.error(
+        "Cleanup failed:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to clean generated files."
+      });
+    }
   }
+);
 
-  if (
-    !/^[a-f0-9-]{36}$/i.test(runId)
-  ) {
-    return res.status(400).json({
-      error: "Invalid run ID."
-    });
-  }
+/*
+ * Run FFmpeg.
+ */
+function runFfmpeg(args) {
+  return new Promise(
+    (resolve, reject) => {
+      const child = spawn(
+        ffmpegBin,
+        args,
+        {
+          windowsHide: true,
+          stdio: [
+            "ignore",
+            "ignore",
+            "pipe"
+          ]
+        }
+      );
 
-  const runDirectory = path.join(
-    tempRoot,
-    runId
+      let stderr = "";
+
+      child.stderr.on(
+        "data",
+        (chunk) => {
+          stderr += chunk.toString();
+        }
+      );
+
+      child.on(
+        "error",
+        (error) => {
+          reject(
+            new Error(
+              `Could not start FFmpeg: ${error.message}`
+            )
+          );
+        }
+      );
+
+      child.on(
+        "close",
+        (code) => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+
+          reject(
+            new Error(
+              `FFmpeg conversion failed: ${
+                stderr.slice(-4000)
+              }`
+            )
+          );
+        }
+      );
+    }
   );
+}
 
-  try {
-    await fs.rm(
-      runDirectory,
-      {
-        recursive: true,
-        force: true
+/*
+ * Convert browser recording into
+ * Instagram/social-ready MP4.
+ */
+app.post(
+  "/api/convert-video",
+  videoUpload.single("video"),
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({
+        error:
+          "Upload a recorded video first."
+      });
+    }
+
+    const runDirectory =
+      path.join(
+        tempRoot,
+        `convert-${crypto.randomUUID()}`
+      );
+
+    const inputExtension =
+      req.file.mimetype === "video/webm"
+        ? "webm"
+        : req.file.mimetype === "video/mp4"
+          ? "mp4"
+          : null;
+
+    if (!inputExtension) {
+      return res.status(400).json({
+        error:
+          "Only WebM and MP4 recordings are supported."
+      });
+    }
+
+    const inputPath =
+      path.join(
+        runDirectory,
+        `recording.${inputExtension}`
+      );
+
+    const outputPath =
+      path.join(
+        runDirectory,
+        "social-ready.mp4"
+      );
+
+    try {
+      await fs.mkdir(
+        runDirectory,
+        {
+          recursive: true
+        }
+      );
+
+      await fs.writeFile(
+        inputPath,
+        req.file.buffer
+      );
+
+      await runFfmpeg([
+        "-y",
+
+        "-i",
+        inputPath,
+
+        "-map",
+        "0:v:0",
+
+        "-map",
+        "0:a:0",
+
+        "-vf",
+        "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1",
+
+        "-c:v",
+        "libx264",
+
+        "-preset",
+        "veryfast",
+
+        "-crf",
+        "20",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-r",
+        "30",
+
+        "-fps_mode",
+        "cfr",
+
+        "-c:a",
+        "aac",
+
+        "-b:a",
+        "128k",
+
+        "-ar",
+        "48000",
+
+        "-ac",
+        "2",
+
+        "-movflags",
+        "+faststart",
+
+        outputPath
+      ]);
+
+      const stats =
+        await fs.stat(
+          outputPath
+        );
+
+      if (!stats.size) {
+        throw new Error(
+          "FFmpeg produced an empty MP4."
+        );
       }
-    );
 
-    return res.json({
-      status: "cleaned",
-      runId
-    });
-  } catch (error) {
-    console.error(
-      "Cleanup failed:",
-      error
-    );
+      res.setHeader(
+        "Content-Type",
+        "video/mp4"
+      );
 
-    return res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to clean generated files."
-    });
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="qa-video.mp4"'
+      );
+
+      res.setHeader(
+        "Content-Length",
+        stats.size
+      );
+
+      /*
+       * Stream the finished MP4 to the browser.
+       *
+       * The temporary conversion directory is
+       * deleted automatically when the stream closes.
+       */
+      const downloadStream =
+        createReadStream(
+          outputPath
+        );
+
+      downloadStream.on(
+        "error",
+        (error) => {
+          console.error(
+            "MP4 download stream failed:",
+            error
+          );
+
+          if (!res.headersSent) {
+            res
+              .status(500)
+              .end(
+                "Failed to send converted video."
+              );
+          } else {
+            res.destroy(error);
+          }
+        }
+      );
+
+      downloadStream.on(
+        "close",
+        () => {
+          fs.rm(
+            runDirectory,
+            {
+              recursive: true,
+              force: true
+            }
+          ).catch(
+            (error) => {
+              console.error(
+                "Temporary conversion cleanup failed:",
+                error
+              );
+            }
+          );
+        }
+      );
+
+      downloadStream.pipe(res);
+    } catch (error) {
+      await fs.rm(
+        runDirectory,
+        {
+          recursive: true,
+          force: true
+        }
+      ).catch(() => {});
+
+      console.error(
+        "Video conversion failed:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Video conversion failed."
+      });
+    }
   }
-});
+);
 
-const host = process.env.HOST || "0.0.0.0";
+const host =
+  process.env.HOST ||
+  "0.0.0.0";
 
-app.listen(port, host, () => {
-  console.log(
-    `Q&A video server running on ${host}:${port}`
-  );
-});
+app.listen(
+  port,
+  host,
+  () => {
+    console.log(
+      `Q&A video server running on ${host}:${port}`
+    );
+  }
+);
