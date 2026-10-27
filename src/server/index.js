@@ -41,6 +41,8 @@ const allowedOrigins = [
   "http://localhost:5173",
   process.env.FRONTEND_URL
 ].filter(Boolean);
+console.log("[CORS] FRONTEND_URL:", process.env.FRONTEND_URL);
+console.log("[CORS] Allowed origins:", allowedOrigins);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
