@@ -1,4 +1,5 @@
 import "dotenv/config";
+
 import express from "express";
 import multer from "multer";
 import fs from "node:fs/promises";
@@ -7,69 +8,181 @@ import crypto from "node:crypto";
 import { createReadStream } from "node:fs";
 import { spawn } from "node:child_process";
 import ffmpegStatic from "ffmpeg-static";
-import { generateQuestionAndAnswerAudio } from "./tts.js";
+
+import {
+  generateQuestionAndAnswerAudio
+} from "./tts.js";
 
 const app = express();
-const port = Number(process.env.PORT || 3001);
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024
-  }
-});
-
-const videoUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 100 * 1024 * 1024
-  }
-});
+const port = Number(
+  process.env.PORT || 3001
+);
 
 const tempRoot = path.resolve(
   process.cwd(),
   "temp"
 );
 
+/*
+ * Template upload.
+ *
+ * Templates are kept in memory because they are
+ * only received as part of the audio-generation
+ * request and are not stored on the server.
+ */
+const upload = multer({
+  storage: multer.memoryStorage(),
+
+  limits: {
+    fileSize: 10 * 1024 * 1024
+  }
+});
+
+/*
+ * Video upload.
+ *
+ * IMPORTANT:
+ * Do NOT use memoryStorage() here.
+ *
+ * Recorded videos can be large and keeping them
+ * in req.file.buffer can cause the Render service
+ * to exceed its memory limit.
+ *
+ * Multer writes the uploaded video directly to disk.
+ */
+const videoUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (
+      _req,
+      _file,
+      cb
+    ) => {
+      const uploadDirectory =
+        path.join(
+          tempRoot,
+          "uploads"
+        );
+
+      try {
+        await fs.mkdir(
+          uploadDirectory,
+          {
+            recursive: true
+          }
+        );
+
+        cb(
+          null,
+          uploadDirectory
+        );
+      } catch (error) {
+        cb(error);
+      }
+    },
+
+    filename: (
+      _req,
+      file,
+      cb
+    ) => {
+      const extension =
+        file.mimetype ===
+        "video/webm"
+          ? ".webm"
+          : file.mimetype ===
+              "video/mp4"
+            ? ".mp4"
+            : "";
+
+      cb(
+        null,
+        `${crypto.randomUUID()}${extension}`
+      );
+    }
+  }),
+
+  limits: {
+    fileSize:
+      100 * 1024 * 1024
+  }
+});
+
+/*
+ * FFmpeg executable.
+ *
+ * Priority:
+ * 1. FFMPEG_BIN environment variable
+ * 2. ffmpeg-static package
+ * 3. ffmpeg available on PATH
+ */
 const ffmpegBin =
   process.env.FFMPEG_BIN ||
   ffmpegStatic ||
   "ffmpeg";
 
+/*
+ * CORS
+ */
 const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",
   process.env.FRONTEND_URL
 ].filter(Boolean);
-console.log("[CORS] FRONTEND_URL:", process.env.FRONTEND_URL);
-console.log("[CORS] Allowed origins:", allowedOrigins);
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
+console.log(
+  "[CORS] FRONTEND_URL:",
+  process.env.FRONTEND_URL
+);
 
-  if (allowedOrigins.includes(origin)) {
+console.log(
+  "[CORS] Allowed origins:",
+  allowedOrigins
+);
+
+app.use(
+  (req, res, next) => {
+    const origin =
+      req.headers.origin;
+
+    if (
+      allowedOrigins.includes(
+        origin
+      )
+    ) {
+      res.setHeader(
+        "Access-Control-Allow-Origin",
+        origin
+      );
+
+      res.setHeader(
+        "Vary",
+        "Origin"
+      );
+    }
+
     res.setHeader(
-      "Access-Control-Allow-Origin",
-      origin
+      "Access-Control-Allow-Methods",
+      "GET,POST,OPTIONS"
     );
+
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type"
+    );
+
+    if (
+      req.method ===
+      "OPTIONS"
+    ) {
+      return res.sendStatus(
+        204
+      );
+    }
+
+    next();
   }
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,OPTIONS"
-  );
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type"
-  );
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
+);
 
 app.use(
   express.json({
@@ -77,17 +190,29 @@ app.use(
   })
 );
 
+/*
+ * Generated audio files.
+ */
 app.use(
   "/generated",
-  express.static(tempRoot)
+  express.static(
+    tempRoot
+  )
 );
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    service: "qa-video-generator"
-  });
-});
+/*
+ * Health check.
+ */
+app.get(
+  "/api/health",
+  (_req, res) => {
+    res.json({
+      status: "ok",
+      service:
+        "qa-video-generator"
+    });
+  }
+);
 
 /*
  * Generate question and answer audio.
@@ -100,7 +225,11 @@ app.get("/api/health", (_req, res) => {
 app.post(
   "/api/generate",
   upload.single("template"),
-  async (req, res) => {
+
+  async (
+    req,
+    res
+  ) => {
     const question =
       req.body.question?.trim();
 
@@ -127,13 +256,15 @@ app.post(
 
     if (!question) {
       return res.status(400).json({
-        error: "Enter a Question."
+        error:
+          "Enter a Question."
       });
     }
 
     if (!answer) {
       return res.status(400).json({
-        error: "Enter an Answer."
+        error:
+          "Enter an Answer."
       });
     }
 
@@ -170,19 +301,25 @@ app.post(
        * Generate separate voices.
        */
       const voices =
-        await generateQuestionAndAnswerAudio({
-          question,
-          answer,
-          questionPath,
-          answerPath
-        });
+        await generateQuestionAndAnswerAudio(
+          {
+            question,
+            answer,
+            questionPath,
+            answerPath
+          }
+        );
 
       const [
         questionStats,
         answerStats
       ] = await Promise.all([
-        fs.stat(questionPath),
-        fs.stat(answerPath)
+        fs.stat(
+          questionPath
+        ),
+        fs.stat(
+          answerPath
+        )
       ]);
 
       if (
@@ -195,7 +332,8 @@ app.post(
       }
 
       return res.json({
-        status: "audio-ready",
+        status:
+          "audio-ready",
 
         runId,
 
@@ -217,6 +355,7 @@ app.post(
         answerAudioBytes:
           answerStats.size
       });
+
     } catch (error) {
       await fs.rm(
         runDirectory,
@@ -224,7 +363,9 @@ app.post(
           recursive: true,
           force: true
         }
-      ).catch(() => {});
+      ).catch(
+        () => {}
+      );
 
       console.error(
         "Audio generation failed:",
@@ -246,7 +387,11 @@ app.post(
  */
 app.post(
   "/api/cleanup",
-  async (req, res) => {
+
+  async (
+    req,
+    res
+  ) => {
     const runId =
       req.body.runId?.trim();
 
@@ -257,11 +402,18 @@ app.post(
       });
     }
 
+    /*
+     * Validate UUID before using it
+     * as part of a filesystem path.
+     */
     if (
-      !/^[a-f0-9-]{36}$/i.test(runId)
+      !/^[a-f0-9-]{36}$/i.test(
+        runId
+      )
     ) {
       return res.status(400).json({
-        error: "Invalid run ID."
+        error:
+          "Invalid run ID."
       });
     }
 
@@ -281,9 +433,12 @@ app.post(
       );
 
       return res.json({
-        status: "cleaned",
+        status:
+          "cleaned",
+
         runId
       });
+
     } catch (error) {
       console.error(
         "Cleanup failed:",
@@ -303,34 +458,47 @@ app.post(
 /*
  * Run FFmpeg.
  */
-function runFfmpeg(args) {
+function runFfmpeg(
+  args
+) {
   return new Promise(
-    (resolve, reject) => {
-      const child = spawn(
-        ffmpegBin,
-        args,
-        {
-          windowsHide: true,
-          stdio: [
-            "ignore",
-            "ignore",
-            "pipe"
-          ]
-        }
-      );
+    (
+      resolve,
+      reject
+    ) => {
+      const child =
+        spawn(
+          ffmpegBin,
+          args,
+          {
+            windowsHide:
+              true,
+
+            stdio: [
+              "ignore",
+              "ignore",
+              "pipe"
+            ]
+          }
+        );
 
       let stderr = "";
 
       child.stderr.on(
         "data",
-        (chunk) => {
-          stderr += chunk.toString();
+        (
+          chunk
+        ) => {
+          stderr +=
+            chunk.toString();
         }
       );
 
       child.on(
         "error",
-        (error) => {
+        (
+          error
+        ) => {
           reject(
             new Error(
               `Could not start FFmpeg: ${error.message}`
@@ -341,8 +509,12 @@ function runFfmpeg(args) {
 
       child.on(
         "close",
-        (code) => {
-          if (code === 0) {
+        (
+          code
+        ) => {
+          if (
+            code === 0
+          ) {
             resolve();
             return;
           }
@@ -350,7 +522,9 @@ function runFfmpeg(args) {
           reject(
             new Error(
               `FFmpeg conversion failed: ${
-                stderr.slice(-4000)
+                stderr.slice(
+                  -4000
+                )
               }`
             )
           );
@@ -363,11 +537,24 @@ function runFfmpeg(args) {
 /*
  * Convert browser recording into
  * Instagram/social-ready MP4.
+ *
+ * The uploaded video is written to disk by Multer.
+ * FFmpeg reads that file directly.
+ *
+ * This avoids req.file.buffer and therefore
+ * significantly reduces Node.js memory usage.
  */
 app.post(
   "/api/convert-video",
-  videoUpload.single("video"),
-  async (req, res) => {
+
+  videoUpload.single(
+    "video"
+  ),
+
+  async (
+    req,
+    res
+  ) => {
     if (!req.file) {
       return res.status(400).json({
         error:
@@ -375,30 +562,50 @@ app.post(
       });
     }
 
-    const runDirectory =
-      path.join(
-        tempRoot,
-        `convert-${crypto.randomUUID()}`
-      );
+    /*
+     * Multer has already written the uploaded
+     * video to disk.
+     */
+    const uploadedFilePath =
+      req.file.path;
 
+    /*
+     * Validate the uploaded media type
+     * before creating the conversion directory.
+     */
     const inputExtension =
-      req.file.mimetype === "video/webm"
+      req.file.mimetype ===
+      "video/webm"
         ? "webm"
-        : req.file.mimetype === "video/mp4"
+        : req.file.mimetype ===
+            "video/mp4"
           ? "mp4"
           : null;
 
     if (!inputExtension) {
+      await fs.rm(
+        uploadedFilePath,
+        {
+          force: true
+        }
+      ).catch(
+        () => {}
+      );
+
       return res.status(400).json({
         error:
           "Only WebM and MP4 recordings are supported."
       });
     }
 
-    const inputPath =
+    /*
+     * Create a separate directory for
+     * the FFmpeg output.
+     */
+    const runDirectory =
       path.join(
-        runDirectory,
-        `recording.${inputExtension}`
+        tempRoot,
+        `convert-${crypto.randomUUID()}`
       );
 
     const outputPath =
@@ -415,26 +622,49 @@ app.post(
         }
       );
 
-      await fs.writeFile(
-        inputPath,
-        req.file.buffer
-      );
-
+      /*
+       * IMPORTANT:
+       *
+       * Do NOT do:
+       *
+       * fs.writeFile(
+       *   inputPath,
+       *   req.file.buffer
+       * );
+       *
+       * because diskStorage() does not
+       * provide req.file.buffer.
+       *
+       * FFmpeg reads req.file.path directly.
+       */
       await runFfmpeg([
         "-y",
 
         "-i",
-        inputPath,
+        uploadedFilePath,
 
+        /*
+         * Select the first video stream.
+         */
         "-map",
         "0:v:0",
 
+        /*
+         * Select the first audio stream.
+         */
         "-map",
         "0:a:0",
 
+        /*
+         * Instagram/social-friendly
+         * vertical 1080x1920 output.
+         */
         "-vf",
         "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1",
 
+        /*
+         * H.264 video.
+         */
         "-c:v",
         "libx264",
 
@@ -444,15 +674,24 @@ app.post(
         "-crf",
         "20",
 
+        /*
+         * Widely compatible pixel format.
+         */
         "-pix_fmt",
         "yuv420p",
 
+        /*
+         * Constant 30 FPS.
+         */
         "-r",
         "30",
 
         "-fps_mode",
         "cfr",
 
+        /*
+         * AAC audio.
+         */
         "-c:a",
         "aac",
 
@@ -465,6 +704,10 @@ app.post(
         "-ac",
         "2",
 
+        /*
+         * Put MP4 metadata at the beginning
+         * for faster web/social playback.
+         */
         "-movflags",
         "+faststart",
 
@@ -476,11 +719,27 @@ app.post(
           outputPath
         );
 
-      if (!stats.size) {
+      if (
+        !stats.size
+      ) {
         throw new Error(
           "FFmpeg produced an empty MP4."
         );
       }
+
+      /*
+       * The original browser recording
+       * is no longer needed.
+       *
+       * Delete it before sending the
+       * converted MP4.
+       */
+      await fs.rm(
+        uploadedFilePath,
+        {
+          force: true
+        }
+      );
 
       res.setHeader(
         "Content-Type",
@@ -498,10 +757,10 @@ app.post(
       );
 
       /*
-       * Stream the finished MP4 to the browser.
+       * Stream the converted file.
        *
-       * The temporary conversion directory is
-       * deleted automatically when the stream closes.
+       * This avoids loading the finished
+       * MP4 into Node.js memory.
        */
       const downloadStream =
         createReadStream(
@@ -510,35 +769,51 @@ app.post(
 
       downloadStream.on(
         "error",
-        (error) => {
+        (
+          error
+        ) => {
           console.error(
             "MP4 download stream failed:",
             error
           );
 
-          if (!res.headersSent) {
+          if (
+            !res.headersSent
+          ) {
             res
               .status(500)
               .end(
                 "Failed to send converted video."
               );
           } else {
-            res.destroy(error);
+            res.destroy(
+              error
+            );
           }
         }
       );
 
+      /*
+       * Once the response stream closes,
+       * remove the complete conversion
+       * directory.
+       */
       downloadStream.on(
         "close",
         () => {
           fs.rm(
             runDirectory,
             {
-              recursive: true,
-              force: true
+              recursive:
+                true,
+
+              force:
+                true
             }
           ).catch(
-            (error) => {
+            (
+              error
+            ) => {
               console.error(
                 "Temporary conversion cleanup failed:",
                 error
@@ -548,15 +823,37 @@ app.post(
         }
       );
 
-      downloadStream.pipe(res);
+      downloadStream.pipe(
+        res
+      );
+
     } catch (error) {
+      /*
+       * Clean up both the uploaded source
+       * and the conversion directory when
+       * anything goes wrong.
+       */
+      await fs.rm(
+        uploadedFilePath,
+        {
+          force: true
+        }
+      ).catch(
+        () => {}
+      );
+
       await fs.rm(
         runDirectory,
         {
-          recursive: true,
-          force: true
+          recursive:
+            true,
+
+          force:
+            true
         }
-      ).catch(() => {});
+      ).catch(
+        () => {}
+      );
 
       console.error(
         "Video conversion failed:",
