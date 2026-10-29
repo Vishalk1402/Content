@@ -120,10 +120,8 @@ const videoUpload = multer({
 /*
  * FFmpeg executable.
  *
- * Priority:
- * 1. FFMPEG_BIN environment variable
- * 2. ffmpeg-static package
- * 3. ffmpeg available on PATH
+ * The Docker image installs the system FFmpeg binary.
+ * FFMPEG_BIN remains available for environments with a custom path.
  */
 const ffmpegBin =
   process.env.FFMPEG_BIN ||
