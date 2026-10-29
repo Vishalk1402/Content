@@ -95,12 +95,17 @@ const videoUpload = multer({
       file,
       cb
     ) => {
+      // MediaRecorder MIME types may include codec parameters, e.g.
+      // "video/webm;codecs=vp9,opus". Use the base media type.
+      const mediaType = file.mimetype
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+
       const extension =
-        file.mimetype ===
-        "video/webm"
+        mediaType === "video/webm"
           ? ".webm"
-          : file.mimetype ===
-              "video/mp4"
+          : mediaType === "video/mp4"
             ? ".mp4"
             : "";
 
@@ -664,12 +669,23 @@ app.post(
      * Validate the uploaded media type
      * before creating the conversion directory.
      */
+    // Normalize MIME type because browser recordings can include codec parameters.
+    const uploadedMediaType = req.file.mimetype
+      .split(";")[0]
+      .trim()
+      .toLowerCase();
+
+    console.info("[Video Upload] Received file:", {
+      mimeType: req.file.mimetype,
+      normalizedMimeType: uploadedMediaType,
+      sizeBytes: req.file.size,
+      originalName: req.file.originalname
+    });
+
     const inputExtension =
-      req.file.mimetype ===
-      "video/webm"
+      uploadedMediaType === "video/webm"
         ? "webm"
-        : req.file.mimetype ===
-            "video/mp4"
+        : uploadedMediaType === "video/mp4"
           ? "mp4"
           : null;
 
