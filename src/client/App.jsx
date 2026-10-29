@@ -1099,6 +1099,22 @@ function App() {
       const audioTracks =
         destination.stream.getAudioTracks();
 
+      const combinedStream =
+        new MediaStream([
+          ...videoTracks,
+          ...audioTracks
+        ]);
+
+      // Register resources before validation so failures still release every track.
+      recordingResourcesRef.current = {
+        questionAudio: recordingQuestionAudio,
+        answerAudio: recordingAnswerAudio,
+        audioContext,
+        destination,
+        canvasStream,
+        stream: combinedStream
+      };
+
       if (
         videoTracks.length === 0 ||
         videoTracks.some((track) => track.readyState !== "live")
@@ -1117,14 +1133,16 @@ function App() {
         );
       }
 
-      const combinedStream =
-        new MediaStream([
-          ...videoTracks,
-          ...audioTracks
-        ]);
+      // Prefer WebM for browser capture; the server converts it to social-ready MP4.
+      const mimeTypes = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4;codecs=h264,aac",
+        "video/mp4"
+      ];
 
       console.info("[Recording] Stream tracks before recording:", {
-        mimeCandidates: mimeTypes,
         videoTracks: combinedStream.getVideoTracks().map((track) => ({
           kind: track.kind,
           readyState: track.readyState,
@@ -1136,15 +1154,6 @@ function App() {
           label: track.label
         }))
       });
-
-      // Prefer WebM for the browser capture; the server converts it to social-ready MP4.
-      const mimeTypes = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm",
-        "video/mp4;codecs=h264,aac",
-        "video/mp4"
-      ];
 
       const mimeType =
         mimeTypes.find(
@@ -1188,24 +1197,6 @@ function App() {
       const recordedChunks =
         [];
 
-      recordingResourcesRef.current =
-      {
-        questionAudio:
-          recordingQuestionAudio,
-
-        answerAudio:
-          recordingAnswerAudio,
-
-        audioContext,
-
-        destination,
-
-        canvasStream,
-
-        stream:
-          combinedStream
-      };
-
       recorder.ondataavailable =
         (event) => {
           if (
@@ -1220,12 +1211,9 @@ function App() {
 
       recorder.onerror =
         () => {
-          setIsRecording(
-            false
-          );
-
+          // Let the stop handler perform the single shared cleanup path.
           setError(
-            "Video recording failed."
+            "Video recording failed. Check the browser console for recording diagnostics."
           );
         };
 
