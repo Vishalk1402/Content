@@ -828,9 +828,6 @@ function App() {
     event.preventDefault();
 
     setError("");
-
-    setAudioResult(null);
-
     setPreviewState(
       "idle"
     );
@@ -920,6 +917,8 @@ function App() {
           0
       });
 
+      const previousRunId = audioResult?.runId;
+
       setAudioResult({
         runId:
           data.runId,
@@ -942,6 +941,11 @@ function App() {
         answerAudioBytes:
           data.answerAudioBytes
       });
+
+      // A replacement generation is ready; the previous audio is no longer needed.
+      if (previousRunId && previousRunId !== data.runId) {
+        await cleanupGeneratedRun(previousRunId);
+      }
     } catch (generationError) {
       setError(
         generationError instanceof Error
@@ -1089,36 +1093,67 @@ function App() {
           30
         );
 
+      const videoTracks =
+        canvasStream.getVideoTracks();
+
+      const audioTracks =
+        destination.stream.getAudioTracks();
+
       const combinedStream =
-        new MediaStream();
+        new MediaStream([
+          ...videoTracks,
+          ...audioTracks
+        ]);
 
-      canvasStream
-        .getVideoTracks()
-        .forEach(
-          (track) => {
-            combinedStream.addTrack(
-              track
-            );
-          }
+      // Register resources before validation so failures still release every track.
+      recordingResourcesRef.current = {
+        questionAudio: recordingQuestionAudio,
+        answerAudio: recordingAnswerAudio,
+        audioContext,
+        destination,
+        canvasStream,
+        stream: combinedStream
+      };
+
+      if (
+        videoTracks.length === 0 ||
+        videoTracks.some((track) => track.readyState !== "live")
+      ) {
+        throw new Error(
+          "Canvas recording did not provide a live video track. Please try downloading again."
         );
+      }
 
-      destination.stream
-        .getAudioTracks()
-        .forEach(
-          (track) => {
-            combinedStream.addTrack(
-              track
-            );
-          }
+      if (
+        audioTracks.length === 0 ||
+        audioTracks.some((track) => track.readyState !== "live")
+      ) {
+        throw new Error(
+          "Audio recording did not provide a live audio track. Please regenerate the audio and try again."
         );
+      }
 
+      // Prefer WebM for browser capture; the server converts it to social-ready MP4.
       const mimeTypes = [
-        "video/mp4;codecs=h264,aac",
-        "video/mp4",
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
-        "video/webm"
+        "video/webm",
+        "video/mp4;codecs=h264,aac",
+        "video/mp4"
       ];
+
+      console.info("[Recording] Stream tracks before recording:", {
+        videoTracks: combinedStream.getVideoTracks().map((track) => ({
+          kind: track.kind,
+          readyState: track.readyState,
+          label: track.label
+        })),
+        audioTracks: combinedStream.getAudioTracks().map((track) => ({
+          kind: track.kind,
+          readyState: track.readyState,
+          label: track.label
+        }))
+      });
 
       const mimeType =
         mimeTypes.find(
@@ -1162,24 +1197,6 @@ function App() {
       const recordedChunks =
         [];
 
-      recordingResourcesRef.current =
-      {
-        questionAudio:
-          recordingQuestionAudio,
-
-        answerAudio:
-          recordingAnswerAudio,
-
-        audioContext,
-
-        destination,
-
-        canvasStream,
-
-        stream:
-          combinedStream
-      };
-
       recorder.ondataavailable =
         (event) => {
           if (
@@ -1194,12 +1211,9 @@ function App() {
 
       recorder.onerror =
         () => {
-          setIsRecording(
-            false
-          );
-
+          // Let the stop handler perform the single shared cleanup path.
           setError(
-            "Video recording failed."
+            "Video recording failed. Check the browser console for recording diagnostics."
           );
         };
 
@@ -1209,8 +1223,22 @@ function App() {
             type: mimeType
           });
 
+          console.info("[Recording] Captured blob:", {
+            type: recordedBlob.type,
+            requestedMimeType: mimeType,
+            sizeBytes: recordedBlob.size,
+            videoTrackStates: videoTracks.map((track) => track.readyState),
+            audioTrackStates: audioTracks.map((track) => track.readyState)
+          });
+
           if (!recordedBlob.size) {
             throw new Error("The recorded video is empty.");
+          }
+
+          if (!recordedBlob.type.startsWith("video/")) {
+            throw new Error(
+              `The browser returned an unexpected recording type: ${recordedBlob.type || "unknown"}.`
+            );
           }
 
           const formData = new FormData();
@@ -1232,8 +1260,14 @@ function App() {
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
 
+            console.error("[Video Conversion] Server rejected upload:", {
+              status: response.status,
+              statusText: response.statusText,
+              details: data
+            });
+
             throw new Error(
-              data.error || "Could not convert the video to MP4."
+              data.error || `Video conversion failed (HTTP ${response.status}).`
             );
           }
 
@@ -1257,8 +1291,6 @@ function App() {
 
           setDownloadFormat("MP4");
 
-          // Delete the original generated question/answer audio.
-          await cleanupGeneratedRun(audioResult.runId);
         } catch (error) {
           setError(
             error instanceof Error

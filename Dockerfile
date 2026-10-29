@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Install Node dependencies first for better Docker layer caching.
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --omit=dev
 
 # Install Python dependencies.
 COPY requirements.txt ./
