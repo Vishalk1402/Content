@@ -670,24 +670,32 @@ app.post(
      * before creating the conversion directory.
      */
     // Normalize MIME type because browser recordings can include codec parameters.
-    const uploadedMediaType = req.file.mimetype
+    const uploadedMediaType = String(req.file.mimetype || "")
       .split(";")[0]
       .trim()
       .toLowerCase();
 
+    const originalName = String(req.file.originalname || "").toLowerCase();
+
+    // Some clients/proxies send a generic MIME type for a Blob upload.
+    // Fall back to the filename extension when the MIME type is not recognized.
+    const inputExtension =
+      uploadedMediaType === "video/webm" || (
+        uploadedMediaType !== "video/mp4" &&
+        originalName.endsWith(".webm")
+      )
+        ? "webm"
+        : uploadedMediaType === "video/mp4" || originalName.endsWith(".mp4")
+          ? "mp4"
+          : null;
+
     console.info("[Video Upload] Received file:", {
       mimeType: req.file.mimetype,
       normalizedMimeType: uploadedMediaType,
+      detectedInputFormat: inputExtension,
       sizeBytes: req.file.size,
       originalName: req.file.originalname
     });
-
-    const inputExtension =
-      uploadedMediaType === "video/webm"
-        ? "webm"
-        : uploadedMediaType === "video/mp4"
-          ? "mp4"
-          : null;
 
     if (!inputExtension) {
       await fs.rm(
