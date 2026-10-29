@@ -1260,8 +1260,14 @@ function App() {
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
 
+            console.error("[Video Conversion] Server rejected upload:", {
+              status: response.status,
+              statusText: response.statusText,
+              details: data
+            });
+
             throw new Error(
-              data.error || "Could not convert the video to MP4."
+              data.error || `Video conversion failed (HTTP ${response.status}).`
             );
           }
 
