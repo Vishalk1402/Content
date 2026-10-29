@@ -7,7 +7,6 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { createReadStream } from "node:fs";
 import { spawn } from "node:child_process";
-import ffmpegStatic from "ffmpeg-static";
 
 import {
   generateQuestionAndAnswerAudio
@@ -23,6 +22,16 @@ const tempRoot = path.resolve(
   process.cwd(),
   "temp"
 );
+
+// Temporary artifacts are retained for at most two hours by default.
+// Override with TEMP_FILE_TTL_MS if production needs a different window.
+const TEMP_FILE_TTL_MS = Math.max(
+  15 * 60 * 1000,
+  Number(process.env.TEMP_FILE_TTL_MS || 2 * 60 * 60 * 1000)
+);
+
+const TEMP_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+const activeTempPaths = new Set();
 
 /*
  * Template upload.
@@ -118,8 +127,86 @@ const videoUpload = multer({
  */
 const ffmpegBin =
   process.env.FFMPEG_BIN ||
-  ffmpegStatic ||
   "ffmpeg";
+
+/*
+ * Remove expired temporary files left by completed or interrupted requests.
+ * Active generation/conversion paths are protected from the cleanup sweep.
+ */
+function isActivePathOrContainsActive(targetPath) {
+  const resolvedTarget = path.resolve(targetPath);
+
+  for (const activePath of activeTempPaths) {
+    const resolvedActive = path.resolve(activePath);
+
+    if (
+      resolvedActive === resolvedTarget ||
+      resolvedActive.startsWith(resolvedTarget + path.sep)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function cleanupStaleTempEntries(directory, cutoffTime) {
+  let entries;
+
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+
+    if (isActivePathOrContainsActive(entryPath)) continue;
+
+    let stats;
+
+    try {
+      stats = await fs.lstat(entryPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+
+    // Never follow symlinks outside the temp directory.
+    if (stats.isSymbolicLink()) {
+      if (stats.mtimeMs < cutoffTime) {
+        await fs.rm(entryPath, { force: true });
+      }
+      continue;
+    }
+
+    if (stats.isDirectory()) {
+      await cleanupStaleTempEntries(entryPath, cutoffTime);
+
+      if (isActivePathOrContainsActive(entryPath)) continue;
+
+      const remaining = await fs.readdir(entryPath).catch((error) => {
+        if (error?.code === "ENOENT") return [];
+        throw error;
+      });
+
+      if (remaining.length === 0 && stats.mtimeMs < cutoffTime) {
+        await fs.rm(entryPath, { recursive: true, force: true });
+      }
+    } else if (stats.isFile() && stats.mtimeMs < cutoffTime) {
+      await fs.rm(entryPath, { force: true });
+    }
+  }
+}
+
+async function cleanupStaleTempFiles() {
+  await fs.mkdir(tempRoot, { recursive: true });
+
+  const cutoffTime = Date.now() - TEMP_FILE_TTL_MS;
+  await cleanupStaleTempEntries(tempRoot, cutoffTime);
+}
 
 /*
  * CORS
@@ -297,6 +384,8 @@ app.post(
         }
       );
 
+      activeTempPaths.add(runDirectory);
+
       /*
        * Generate separate voices.
        */
@@ -378,6 +467,8 @@ app.post(
             ? error.message
             : "Audio generation failed."
       });
+    } finally {
+      activeTempPaths.delete(runDirectory);
     }
   }
 );
@@ -569,6 +660,8 @@ app.post(
     const uploadedFilePath =
       req.file.path;
 
+    activeTempPaths.add(uploadedFilePath);
+
     /*
      * Validate the uploaded media type
      * before creating the conversion directory.
@@ -591,6 +684,8 @@ app.post(
       ).catch(
         () => {}
       );
+
+      activeTempPaths.delete(uploadedFilePath);
 
       return res.status(400).json({
         error:
@@ -621,6 +716,8 @@ app.post(
           recursive: true
         }
       );
+
+      activeTempPaths.add(runDirectory);
 
       /*
        * IMPORTANT:
@@ -669,10 +766,10 @@ app.post(
         "libx264",
 
         "-preset",
-        "veryfast",
+        "ultrafast",
 
         "-crf",
-        "20",
+        "23",
 
         /*
          * Widely compatible pixel format.
@@ -741,6 +838,8 @@ app.post(
         }
       );
 
+      activeTempPaths.delete(uploadedFilePath);
+
       res.setHeader(
         "Content-Type",
         "video/mp4"
@@ -801,6 +900,8 @@ app.post(
       downloadStream.on(
         "close",
         () => {
+          activeTempPaths.delete(runDirectory);
+
           fs.rm(
             runDirectory,
             {
@@ -842,6 +943,9 @@ app.post(
         () => {}
       );
 
+      activeTempPaths.delete(uploadedFilePath);
+      activeTempPaths.delete(runDirectory);
+
       await fs.rm(
         runDirectory,
         {
@@ -874,12 +978,28 @@ const host =
   process.env.HOST ||
   "0.0.0.0";
 
+// Clean expired temp artifacts at startup and every 15 minutes.
+cleanupStaleTempFiles().catch((error) => {
+  console.error("Initial temporary-file cleanup failed:", error);
+});
+
+const cleanupTimer = setInterval(() => {
+  cleanupStaleTempFiles().catch((error) => {
+    console.error("Scheduled temporary-file cleanup failed:", error);
+  });
+}, TEMP_CLEANUP_INTERVAL_MS);
+
+cleanupTimer.unref?.();
+
 app.listen(
   port,
   host,
   () => {
     console.log(
       `Q&A video server running on ${host}:${port}`
+    );
+    console.log(
+      `Temporary files expire after ${Math.round(TEMP_FILE_TTL_MS / 60000)} minutes.`
     );
   }
 );
